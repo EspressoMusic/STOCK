@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: nasdaq-extreme-movers-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:///./stockbot.db
+      - key: SCAN_MIN_ABS_PERCENT
+        value: "8.0"
+      - key: SCAN_MIN_VOLUME
+        value: "100000"
+      - key: SCAN_MAX_RESULTS
+        value: "100"
+      - key: SCAN_EXCLUDE_DERIVATIVES
+        value: "true"
+      - key: BROKEN_MAX_PRICE
+        value: "2.0"
+      - key: BROKEN_MIN_DRAWDOWN_PERCENT
+        value: "60.0"
+      - key: BROKEN_MIN_VOLUME
+        value: "20000"
+      - key: SCAN_TIME_1
+        value: "09:45"
+      - key: SCAN_TIME_2
+        value: "16:15"
+      - key: BROKEN_SCAN_TIME
+        value: "08:30"
+      - key: SCAN_TIMEZONE
+        value: America/New_York

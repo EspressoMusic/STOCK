@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+yfinance
+apscheduler
+sqlalchemy
+openai
+pydantic-settings
+python-dotenv
+httpx

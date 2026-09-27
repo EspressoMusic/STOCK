@@ -17,6 +17,10 @@ from yfinance import EquityQuery
 
 logger = logging.getLogger(__name__)
 
+
+class MarketDataUnavailable(RuntimeError):
+    """The provider failed; this is not a successful scan with no matches."""
+
 # Yahoo's screener has no predefined crypto universe and EquityQuery's region/exchange
 # fields don't cover the crypto exchange ("CCC"), so the crypto list is curated and
 # fetched one ticker at a time via fast_info instead (see scan_crypto below).
@@ -87,7 +91,9 @@ def _fetch_all_quotes(query, sort_field: str, sort_asc: bool, fetch_cap: int) ->
     offset = 0
     while offset < fetch_cap:
         res = yf.screen(query, sortField=sort_field, sortAsc=sort_asc, size=page_size, offset=offset)
-        quotes = (res or {}).get("quotes", [])
+        if not isinstance(res, dict) or not isinstance(res.get("quotes"), list):
+            raise MarketDataUnavailable("Yahoo returned an invalid screener response")
+        quotes = res["quotes"]
         if not quotes:
             break
         all_quotes.extend(quotes)
@@ -155,9 +161,9 @@ def scan_nasdaq(
         all_quotes = _fetch_all_quotes(
             query, sort_field="percentchange", sort_asc=(direction == "losers"), fetch_cap=fetch_cap,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 
@@ -207,9 +213,9 @@ def scan_broken_stocks(
         all_quotes = _fetch_all_quotes(
             query, sort_field="fiftytwowkpercentchange", sort_asc=True, fetch_cap=fetch_cap,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 
@@ -293,9 +299,9 @@ def scan_by_cap(
 
     try:
         all_quotes = _fetch_all_quotes(query, sort_field=sort_field, sort_asc=sort_asc, fetch_cap=fetch_cap)
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 

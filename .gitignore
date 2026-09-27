@@ -9,3 +9,6 @@ frontend/dist/
 frontend/vite.log
 frontend/.env
 .DS_Store
+.venv/
+.pytest_cache/
+**/__pycache__/

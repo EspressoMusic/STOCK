@@ -7,13 +7,14 @@ from typing import Optional
 
 from fastapi import FastAPI, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import init_db, get_db
 from .models import Scan
-from .scanner import VALID_SECTORS, scan_crypto, scan_by_cap
+from .scanner import VALID_SECTORS, MarketDataUnavailable, scan_crypto, scan_by_cap
 from .schemas import (
     ScanOut, ScanSummaryOut, RunScanRequest, TechnicalScanOut, CandlesOut,
     EmaBreakoutScanOut, EmaTouch4hScanOut, EmaDoubleTouchForexScanOut,
@@ -46,6 +47,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Nasdaq Extreme Movers Bot", lifespan=lifespan)
+
+
+@app.exception_handler(MarketDataUnavailable)
+async def market_data_unavailable_handler(request, exc):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "לא ניתן לקבל כרגע נתוני מניות מ-Yahoo Finance. הסריקה נכשלה ולא נשמרה. נסה שוב מאוחר יותר."},
+    )
 
 _technical_scan_lock = threading.Lock()
 _last_technical_scan: dict[str, TechnicalScanOut] = {}

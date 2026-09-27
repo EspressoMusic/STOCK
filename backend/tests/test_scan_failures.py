@@ -8,6 +8,11 @@ from app.db import get_db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def no_live_fallback(monkeypatch):
+    monkeypatch.setattr(scanner, "_nasdaq_quotes", Mock(side_effect=scanner.MarketDataUnavailable("offline")))
+
+
 @pytest.mark.parametrize("scan", [
     lambda: scanner.scan_nasdaq("losers"),
     lambda: scanner.scan_nasdaq("gainers"),
@@ -42,6 +47,36 @@ def test_later_page_failure_does_not_return_partial_success(monkeypatch):
         scanner.scan_nasdaq("losers")
 
 
+def test_nasdaq_fallback_preserves_mover_filters_and_sort(monkeypatch):
+    monkeypatch.setattr(scanner.yf, "screen", Mock(side_effect=RuntimeError("HTTP 401")))
+    def quote(symbol, change, volume=200_000, price=5):
+        return {"symbol": symbol, "shortName": symbol, "regularMarketPrice": price,
+                "regularMarketChangePercent": change, "regularMarketVolume": volume}
+    monkeypatch.setattr(scanner, "_nasdaq_quotes", lambda: [
+        quote("AAA", -10), quote("BBB", -20), quote("CCC", 15),
+        quote("DDD", -2), quote("EEE", -30, volume=1),
+        quote("FFF", -40, price=50), quote("ABCDW", -50),
+    ])
+    result = scanner.scan_nasdaq("losers", max_price=10)
+    assert [c.symbol for c in result.candidates] == ["BBB", "AAA"]
+    assert result.total_matches == 2
+    assert [c.symbol for c in scanner.scan_nasdaq("gainers").candidates] == ["CCC"]
+
+
+def test_fallback_does_not_drop_unsupported_filters(monkeypatch):
+    monkeypatch.setattr(scanner.yf, "screen", Mock(side_effect=RuntimeError("HTTP 401")))
+    for run in (scanner.scan_broken_stocks, lambda: scanner.scan_nasdaq("losers", sector="Technology")):
+        with pytest.raises(scanner.MarketDataUnavailable):
+            run()
+
+
+def test_nasdaq_number_parsing():
+    assert scanner._number("$1,234.50") == 1234.5
+    assert scanner._number("-12.5%") == -12.5
+    for value in (None, "N/A", "", "NaN", "Infinity"):
+        assert scanner._number(value) is None
+
+
 def test_failed_scan_returns_503_without_saving_or_spending(monkeypatch):
     from app import pipeline
 
@@ -57,7 +92,7 @@ def test_failed_scan_returns_503_without_saving_or_spending(monkeypatch):
         client = TestClient(app)
         response = client.post("/api/scans/run", json={"direction": "losers"})
         assert response.status_code == 503
-        assert "Yahoo Finance" in response.json()["detail"]
+        assert "detail" in response.json()
         db.add.assert_not_called()
         db.commit.assert_not_called()
         enrich.assert_not_called()

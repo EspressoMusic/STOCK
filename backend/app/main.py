@@ -53,7 +53,7 @@ app = FastAPI(title="Nasdaq Extreme Movers Bot", lifespan=lifespan)
 async def market_data_unavailable_handler(request, exc):
     return JSONResponse(
         status_code=503,
-        content={"detail": "לא ניתן לקבל כרגע נתוני מניות מ-Yahoo Finance. הסריקה נכשלה ולא נשמרה. נסה שוב מאוחר יותר."},
+        content={"detail": "לא ניתן לקבל כרגע נתוני מניות עבור הסינון הזה מספקי הנתונים. הסריקה נכשלה ולא נשמרה. נסה שוב מאוחר יותר."},
     )
 
 _technical_scan_lock = threading.Lock()

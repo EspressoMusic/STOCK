@@ -8,6 +8,7 @@ Yahoo's own server-side sort is unreliable/stale, so we widen the server-side fi
 and always re-sort client-side on a live field before trimming to the final list."""
 import re
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,6 +16,20 @@ import yfinance as yf
 from yfinance import EquityQuery
 
 logger = logging.getLogger(__name__)
+
+# Yahoo's screener has no predefined crypto universe and EquityQuery's region/exchange
+# fields don't cover the crypto exchange ("CCC"), so the crypto list is curated and
+# fetched one ticker at a time via fast_info instead (see scan_crypto below).
+CRYPTO_SYMBOLS = [
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD", "DOGE-USD",
+    "ADA-USD", "AVAX-USD", "LINK-USD", "TRX-USD", "TON-USD", "DOT-USD",
+    "HBAR-USD", "SHIB-USD", "LTC-USD", "BCH-USD", "NEAR-USD", "ATOM-USD",
+    "XLM-USD", "ETC-USD",
+]
+
+LARGE_CAP_MIN = 10_000_000_000
+SMALL_CAP_MIN = 300_000_000
+SMALL_CAP_MAX = 2_000_000_000
 
 # All three Nasdaq listing tiers
 NASDAQ_EXCHANGES = ["NMS", "NGM", "NCM"]
@@ -203,5 +218,90 @@ def scan_broken_stocks(
     candidates.sort(
         key=lambda c: c.market_cap if c.market_cap is not None else float("inf"),
     )
+
+    return ScanQueryResult(candidates=candidates, total_matches=len(candidates))
+
+
+def _crypto_quote_to_candidate(symbol: str) -> Optional[ScanCandidate]:
+    try:
+        fi = yf.Ticker(symbol).fast_info
+        price = fi.get("lastPrice")
+        prev_close = fi.get("previousClose")
+        if price is None:
+            return None
+        change_percent = (price - prev_close) / prev_close * 100 if prev_close else None
+        return ScanCandidate(
+            symbol=symbol,
+            name=symbol.replace("-USD", ""),
+            price=float(price),
+            change_percent=change_percent,
+            volume=fi.get("lastVolume"),
+            market_cap=fi.get("marketCap"),
+        )
+    except Exception:
+        logger.warning("Crypto quote fetch failed for %s", symbol)
+        return None
+
+
+def scan_crypto(symbols: list[str] = CRYPTO_SYMBOLS, max_workers: int = 8) -> ScanQueryResult:
+    """Today's movers among a curated list of major USD crypto pairs — Yahoo's
+    screener has no predefined crypto universe, so each symbol is quoted directly."""
+    candidates: list[ScanCandidate] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_crypto_quote_to_candidate, s) for s in symbols]
+        for future in as_completed(futures):
+            candidate = future.result()
+            if candidate is not None:
+                candidates.append(candidate)
+
+    candidates.sort(
+        key=lambda c: abs(c.change_percent) if c.change_percent is not None else 0,
+        reverse=True,
+    )
+    return ScanQueryResult(candidates=candidates, total_matches=len(candidates))
+
+
+def scan_by_cap(
+    size: str,
+    min_volume: int = 100_000,
+    sector: Optional[str] = None,
+    exclude_derivatives: bool = True,
+    fetch_cap: int = 250,
+) -> ScanQueryResult:
+    """size: 'large' (>$10B, ranked by market cap) or 'small' ($300M-$2B, ranked
+    by today's % move) — a browsing category, not a "these broke out" signal."""
+    if size not in ("large", "small"):
+        raise ValueError("size must be 'large' or 'small'")
+
+    clauses = [
+        EquityQuery("eq", ["region", "us"]),
+        EquityQuery("is-in", ["exchange", *NASDAQ_EXCHANGES]),
+        EquityQuery("gt", ["dayvolume", min_volume]),
+    ]
+    if size == "large":
+        clauses.append(EquityQuery("gt", ["intradaymarketcap", LARGE_CAP_MIN]))
+        sort_field, sort_asc = "intradaymarketcap", False
+    else:
+        clauses.append(EquityQuery("btwn", ["intradaymarketcap", SMALL_CAP_MIN, SMALL_CAP_MAX]))
+        sort_field, sort_asc = "percentchange", False
+
+    sector_clause = _sector_clause(sector)
+    if sector_clause:
+        clauses.append(sector_clause)
+
+    query = EquityQuery("and", clauses)
+
+    try:
+        all_quotes = _fetch_all_quotes(query, sort_field=sort_field, sort_asc=sort_asc, fetch_cap=fetch_cap)
+    except Exception:
+        logger.exception("Yahoo Finance screener request failed")
+        return ScanQueryResult(candidates=[], total_matches=0)
+
+    candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
+
+    if size == "large":
+        candidates.sort(key=lambda c: c.market_cap if c.market_cap is not None else 0, reverse=True)
+    else:
+        candidates.sort(key=lambda c: c.change_percent if c.change_percent is not None else 0, reverse=True)
 
     return ScanQueryResult(candidates=candidates, total_matches=len(candidates))

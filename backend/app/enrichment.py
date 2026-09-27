@@ -23,11 +23,13 @@ class NewsItem:
 class Enrichment:
     sector: Optional[str] = None
     industry: Optional[str] = None
+    business_summary: Optional[str] = None
     target_mean_price: Optional[float] = None
     target_high_price: Optional[float] = None
     target_low_price: Optional[float] = None
     recommendation_key: Optional[str] = None
     num_analyst_opinions: Optional[int] = None
+    avg_volume: Optional[int] = None  # trailing 3-month average daily volume, for spotting real volume spikes
     news: list[NewsItem] = field(default_factory=list)
 
 
@@ -54,40 +56,48 @@ def enrich_symbol(symbol: str, news_limit: int = 4) -> Enrichment:
         info = ticker.info or {}
         result.sector = info.get("sector")
         result.industry = info.get("industry")
+        result.business_summary = info.get("longBusinessSummary")
         result.target_mean_price = info.get("targetMeanPrice")
         result.target_high_price = info.get("targetHighPrice")
         result.target_low_price = info.get("targetLowPrice")
         rec = info.get("recommendationKey")
         result.recommendation_key = rec if rec and rec != "none" else None
         result.num_analyst_opinions = info.get("numberOfAnalystOpinions")
+        result.avg_volume = info.get("averageVolume")
     except Exception:
         logger.warning("Failed to fetch info for %s", symbol, exc_info=True)
 
     try:
         raw_news = ticker.news or []
         for item in raw_news[:news_limit]:
-            content = item.get("content", item)
-            title = content.get("title")
-            if not title:
-                continue
-            provider = content.get("provider")
-            publisher = provider.get("displayName") if isinstance(provider, dict) else content.get("publisher")
-            link = None
-            link_obj = content.get("canonicalUrl") or content.get("clickThroughUrl")
-            if isinstance(link_obj, dict):
-                link = link_obj.get("url")
-            elif isinstance(link_obj, str):
-                link = link_obj
-            result.news.append(NewsItem(
-                title=title,
-                publisher=publisher,
-                link=link,
-                published_at=_parse_pub_date(content.get("pubDate")),
-            ))
+            parsed = _news_item_from_raw(item)
+            if parsed:
+                result.news.append(parsed)
     except Exception:
         logger.warning("Failed to fetch news for %s", symbol, exc_info=True)
 
     return result
+
+
+def _news_item_from_raw(item: dict) -> Optional[NewsItem]:
+    content = item.get("content", item)
+    title = content.get("title")
+    if not title:
+        return None
+    provider = content.get("provider")
+    publisher = provider.get("displayName") if isinstance(provider, dict) else content.get("publisher")
+    link = None
+    link_obj = content.get("canonicalUrl") or content.get("clickThroughUrl")
+    if isinstance(link_obj, dict):
+        link = link_obj.get("url")
+    elif isinstance(link_obj, str):
+        link = link_obj
+    return NewsItem(
+        title=title,
+        publisher=publisher,
+        link=link,
+        published_at=_parse_pub_date(content.get("pubDate")),
+    )
 
 
 def enrich_symbols(symbols: list[str], news_limit: int = 4, max_workers: int = 8) -> dict[str, Enrichment]:

@@ -1,6 +1,12 @@
 export function formatPrice(value) {
   if (value === null || value === undefined) return "—";
-  return `$${value < 1 ? value.toFixed(4) : value.toFixed(2)}`;
+  if (value < 1) return `$${value.toFixed(4)}`;
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export function formatRate(value) {
+  if (value === null || value === undefined) return "—";
+  return value.toFixed(5);
 }
 
 export function formatPercent(value) {
@@ -14,10 +20,10 @@ export function formatCompact(value) {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-export function formatDateTime(iso) {
+export function formatDateTime(iso, lang = "he") {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleString("he-IL", {
+  return d.toLocaleString(lang === "en" ? "en-GB" : "he-IL", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -25,11 +31,19 @@ export function formatDateTime(iso) {
   });
 }
 
-export function formatRelative(unixSeconds) {
+export function formatRelative(unixSeconds, lang = "he") {
   if (!unixSeconds) return null;
   const diffMs = Date.now() - unixSeconds * 1000;
   const diffH = diffMs / 3_600_000;
-  if (diffH < 1) return `לפני ${Math.max(1, Math.round(diffH * 60))} דקות`;
-  if (diffH < 24) return `לפני ${Math.round(diffH)} שעות`;
-  return `לפני ${Math.round(diffH / 24)} ימים`;
+  const isEn = lang === "en";
+  if (diffH < 1) {
+    const mins = Math.max(1, Math.round(diffH * 60));
+    return isEn ? `${mins}m ago` : `לפני ${mins} דקות`;
+  }
+  if (diffH < 24) {
+    const hrs = Math.round(diffH);
+    return isEn ? `${hrs}h ago` : `לפני ${hrs} שעות`;
+  }
+  const days = Math.round(diffH / 24);
+  return isEn ? `${days}d ago` : `לפני ${days} ימים`;
 }

@@ -34,6 +34,7 @@ class StockResult(Base):
     price = Column(Float, nullable=True)
     change_percent = Column(Float, nullable=True)
     volume = Column(BigInteger, nullable=True)
+    avg_volume = Column(BigInteger, nullable=True)  # trailing 3-month average daily volume
     market_cap = Column(BigInteger, nullable=True)
     fifty_two_week_high = Column(Float, nullable=True)
     fifty_two_week_low = Column(Float, nullable=True)
@@ -47,5 +48,6 @@ class StockResult(Base):
 
     news_json = Column(Text, nullable=True)  # JSON-encoded list of {title, publisher, link, time}
     ai_summary = Column(Text, nullable=True)
+    company_blurb = Column(Text, nullable=True)  # one-sentence "what this company does"
 
     scan = relationship("Scan", back_populates="results")

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .scanner import scan_nasdaq, scan_broken_stocks
 from .enrichment import enrich_symbols, Enrichment
-from .ai_summary import generate_outlook
+from .ai_summary import generate_outlook, generate_company_blurb
 from .models import Scan, StockResult
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,27 @@ def _generate_outlooks(candidates, direction, enrichment_map, max_workers: int =
             symbol, outlook = future.result()
             outlooks[symbol] = outlook
     return outlooks
+
+
+def _generate_company_blurbs(candidates, enrichment_map, max_workers: int = 5) -> dict[str, str]:
+    blurbs: dict[str, str] = {}
+
+    def _one(c):
+        enrichment = enrichment_map.get(c.symbol) or Enrichment()
+        return c.symbol, generate_company_blurb(
+            symbol=c.symbol,
+            name=c.name,
+            sector=enrichment.sector,
+            industry=enrichment.industry,
+            business_summary=enrichment.business_summary,
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_one, c) for c in candidates]
+        for future in as_completed(futures):
+            symbol, blurb = future.result()
+            blurbs[symbol] = blurb
+    return blurbs
 
 
 def _run_query(direction: str, sector, max_price, min_abs_percent):
@@ -79,6 +100,7 @@ def run_scan(
     symbols = [c.symbol for c in candidates]
     enrichment_map = enrich_symbols(symbols)
     outlook_map = _generate_outlooks(candidates, direction, enrichment_map)
+    blurb_map = _generate_company_blurbs(candidates, enrichment_map)
 
     scan = Scan(direction=direction, category=sector, total_matches=total_matches)
     db.add(scan)
@@ -100,6 +122,7 @@ def run_scan(
             price=c.price,
             change_percent=c.change_percent,
             volume=c.volume,
+            avg_volume=enrichment.avg_volume,
             market_cap=c.market_cap,
             fifty_two_week_high=c.fifty_two_week_high,
             fifty_two_week_low=c.fifty_two_week_low,
@@ -111,6 +134,7 @@ def run_scan(
             num_analyst_opinions=enrichment.num_analyst_opinions,
             news_json=json.dumps(news_payload, ensure_ascii=False),
             ai_summary=outlook_map.get(c.symbol),
+            company_blurb=blurb_map.get(c.symbol),
         )
         db.add(result)
 

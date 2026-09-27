@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     broken_scan_time: str = "08:30"
     scan_timezone: str = "America/New_York"
 
+    # Technical scan (15m StochRSI overbought/oversold + EMA50 touch) — on-demand only,
+    # no scheduling, no persistence.
+    technical_stochrsi_overbought: float = 80.0
+    technical_stochrsi_oversold: float = 20.0
+    technical_ema_period: int = 50
+    technical_stock_universe_size: int = 250
+    technical_scan_workers: int = 12
+
     # Storage
     database_url: str = "sqlite:///./stockbot.db"
 

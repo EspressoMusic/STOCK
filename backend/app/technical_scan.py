@@ -13,7 +13,7 @@ import yfinance as yf
 
 from .candles import get_4h_dataframe
 from .config import settings
-from .scanner import NASDAQ_EXCHANGES, _fetch_all_quotes, _is_derivative
+from .scanner import CRYPTO_SYMBOLS, NASDAQ_EXCHANGES, _fetch_all_quotes, _is_derivative
 from yfinance import EquityQuery
 
 logger = logging.getLogger(__name__)
@@ -426,6 +426,421 @@ def scan_ema50_double_touch_forex_1h() -> EmaDoubleTouchForexScanResult:
         scanned_at=datetime.now(timezone.utc).isoformat(),
         universe_forex_count=len(FOREX_PAIRS),
         forex=forex,
+    )
+
+
+AOI_LOOKBACK_4H = 90  # ~3 weeks of 4h candles to search for a repeatedly-tested level
+AOI_MIN_BARS = AOI_LOOKBACK_4H
+AOI_SWING_ORDER = 2  # bars required on each side to confirm a swing high/low (5-bar fractal)
+AOI_MIN_TOUCHES = 2  # a level needs at least this many separate swing touches to count as an AOI
+AOI_CLUSTER_TOLERANCE_PCT = 0.01  # swing prices within 1% of each other are treated as the same level
+AOI_CONFLUENCE_TOLERANCE_PCT = 0.0015  # how close EMA50 / the current candle must be to the zone to count as "at" it
+
+
+@dataclass
+class PatternCandidate:
+    symbol: str
+    name: Optional[str]
+    direction: str  # "short" | "long"
+    price: float
+    ema: float
+    ema_period: int
+    zone_low: float
+    zone_high: float
+    touch_count: int
+    last_touch_time: str
+    candle_time: str
+
+
+@dataclass
+class PatternScanResult:
+    scanned_at: str
+    universe_stock_count: int
+    stocks: list[PatternCandidate]
+
+
+def _find_swing_points(df: pd.DataFrame, order: int = AOI_SWING_ORDER) -> tuple[list[int], list[int]]:
+    """Fractal-style local extrema: bar i is a swing high/low if its High/Low is the
+    unique max/min within the `order`-bar window on each side of it."""
+    highs = df["High"].to_numpy()
+    lows = df["Low"].to_numpy()
+    n = len(df)
+    swing_highs: list[int] = []
+    swing_lows: list[int] = []
+    for i in range(order, n - order):
+        window_high = highs[i - order : i + order + 1]
+        if highs[i] == window_high.max() and (window_high == highs[i]).sum() == 1:
+            swing_highs.append(i)
+        window_low = lows[i - order : i + order + 1]
+        if lows[i] == window_low.min() and (window_low == lows[i]).sum() == 1:
+            swing_lows.append(i)
+    return swing_highs, swing_lows
+
+
+def _cluster_levels(
+    points: list[tuple[int, float]], tolerance_pct: float, min_touches: int
+) -> list[tuple[float, float, list[int]]]:
+    """Groups nearby swing prices into levels: sorted-by-price points within
+    tolerance_pct of the level's anchor (its lowest price) collapse into the same
+    level. Anchored to the low rather than chained neighbor-to-neighbor, so a level
+    can't drift arbitrarily wide through a run of touches each a bit further out than
+    the last. A level only counts if it was touched at least min_touches separate
+    times. Returns (level_low, level_high, bar_indices) per qualifying level."""
+    if not points:
+        return []
+    ordered = sorted(points, key=lambda p: p[1])
+    levels: list[tuple[float, float, list[int]]] = []
+    current_idx = [ordered[0][0]]
+    current_prices = [ordered[0][1]]
+    for idx, price in ordered[1:]:
+        if price - current_prices[0] <= current_prices[0] * tolerance_pct:
+            current_idx.append(idx)
+            current_prices.append(price)
+        else:
+            if len(current_idx) >= min_touches:
+                levels.append((min(current_prices), max(current_prices), current_idx))
+            current_idx = [idx]
+            current_prices = [price]
+    if len(current_idx) >= min_touches:
+        levels.append((min(current_prices), max(current_prices), current_idx))
+    return levels
+
+
+def _evaluate_pattern_strategy(symbol: str, name: Optional[str]) -> Optional[PatternCandidate]:
+    """The user's own strategy: an "area of interest" (AOI) on the 4h chart — a
+    support or resistance level price has reacted from at least twice — sitting right
+    where EMA50 currently is, with the current 4h candle back at that zone."""
+    df4h = get_4h_dataframe(symbol)
+    if df4h is None or len(df4h) < AOI_MIN_BARS:
+        return None
+    window = df4h.iloc[-AOI_LOOKBACK_4H:]
+    ema = window["Close"].ewm(span=settings.technical_ema_period, adjust=False).mean()
+    last_ema = ema.iloc[-1]
+    if pd.isna(last_ema):
+        return None
+
+    swing_highs, swing_lows = _find_swing_points(window)
+    resistance_levels = _cluster_levels(
+        [(i, float(window["High"].iloc[i])) for i in swing_highs], AOI_CLUSTER_TOLERANCE_PCT, AOI_MIN_TOUCHES
+    )
+    support_levels = _cluster_levels(
+        [(i, float(window["Low"].iloc[i])) for i in swing_lows], AOI_CLUSTER_TOLERANCE_PCT, AOI_MIN_TOUCHES
+    )
+
+    last_low, last_high, last_close = (
+        float(window["Low"].iloc[-1]), float(window["High"].iloc[-1]), float(window["Close"].iloc[-1])
+    )
+    tolerance = last_close * AOI_CONFLUENCE_TOLERANCE_PCT
+
+    def zone_matches(zone_low: float, zone_high: float) -> bool:
+        ema_at_zone = zone_low - tolerance <= last_ema <= zone_high + tolerance
+        candle_at_zone = last_low - tolerance <= zone_high and last_high + tolerance >= zone_low
+        return ema_at_zone and candle_at_zone
+
+    best: Optional[tuple[str, float, float, list[int]]] = None
+    for zone_low, zone_high, idxs in resistance_levels:
+        if zone_matches(zone_low, zone_high) and (best is None or len(idxs) > len(best[3])):
+            best = ("short", zone_low, zone_high, idxs)
+    for zone_low, zone_high, idxs in support_levels:
+        if zone_matches(zone_low, zone_high) and (best is None or len(idxs) > len(best[3])):
+            best = ("long", zone_low, zone_high, idxs)
+
+    if best is None:
+        return None
+    direction, zone_low, zone_high, idxs = best
+
+    return PatternCandidate(
+        symbol=symbol,
+        name=name,
+        direction=direction,
+        price=round(last_close, 2),
+        ema=round(float(last_ema), 2),
+        ema_period=settings.technical_ema_period,
+        zone_low=round(zone_low, 2),
+        zone_high=round(zone_high, 2),
+        touch_count=len(idxs),
+        last_touch_time=window.index[max(idxs)].to_pydatetime().astimezone(timezone.utc).isoformat(),
+        candle_time=window.index[-1].to_pydatetime().astimezone(timezone.utc).isoformat(),
+    )
+
+
+def scan_pattern_strategy() -> PatternScanResult:
+    """On-demand scan (not scheduled, not persisted) for liquid Nasdaq stocks matching
+    the user's own strategy: a multi-touch support/resistance area (AOI) on the 4h
+    chart, confluent with EMA50, that the current 4h candle is sitting back at."""
+    stock_universe = _get_stock_universe(settings.technical_stock_universe_size)
+
+    stocks: list[PatternCandidate] = []
+    with ThreadPoolExecutor(max_workers=settings.technical_scan_workers) as pool:
+        futures = [pool.submit(_evaluate_pattern_strategy, sym, name) for sym, name in stock_universe]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result is not None:
+                stocks.append(result)
+
+    stocks.sort(key=lambda c: c.touch_count, reverse=True)
+
+    return PatternScanResult(
+        scanned_at=datetime.now(timezone.utc).isoformat(),
+        universe_stock_count=len(stock_universe),
+        stocks=stocks,
+    )
+
+
+TRIPLE_TOUCH_TIMEFRAME = "1h"
+TRIPLE_TOUCH_HISTORY_PERIOD = "1mo"
+# Every distance below is measured in "candle units" — the average hourly high-low range
+# over the last TRIPLE_TOUCH_UNIT_BARS bars — so one rule fits a $400 stock, a $3 stock
+# and a forex pair moving a few pips an hour alike.
+TRIPLE_TOUCH_UNIT_BARS = 50
+TRIPLE_TOUCH_MIN_REJECTIONS = 3  # completed "came to the level and fell back" cycles
+TRIPLE_TOUCH_MAX_SPAN = 30  # first touch → last touch must fit in this many hourly candles ("not too drawn out")
+TRIPLE_TOUCH_MAX_AGE = 10  # the last touch must be within this many candles of now to still be a live setup
+TRIPLE_TOUCH_ZONE_UNITS = 0.75  # touches within this far of the level's extreme count as "the same place"
+TRIPLE_TOUCH_PULLBACK_UNITS = 2.0  # between touches price must move at least this far away from the level
+TRIPLE_TOUCH_MAX_DISTANCE_UNITS = 6.0  # price already ran further than this from the level → setup has played out
+# Trend filter: EMA50 now vs this many candles ago decides whether it's falling or rising.
+TRIPLE_TOUCH_EMA_SLOPE_BARS = 10
+# Stocks only: sub-$1 names are mostly noise, and a stock whose hourly candles barely
+# move (e.g. pinned by a pending buyout) "touches" any level on tiny wiggles.
+TRIPLE_TOUCH_MIN_STOCK_PRICE = 1.0
+TRIPLE_TOUCH_MIN_STOCK_UNIT_PCT = 0.002
+
+TRIPLE_TOUCH_MARKETS = ("stocks", "forex", "crypto")
+# Wider than FOREX_PAIRS — this pattern is common on the crosses too, and the user asked
+# for as many currencies as possible.
+TRIPLE_TOUCH_EXTRA_FOREX = [
+    ("EURAUD=X", "EUR/AUD"),
+    ("EURCAD=X", "EUR/CAD"),
+    ("EURNZD=X", "EUR/NZD"),
+    ("GBPAUD=X", "GBP/AUD"),
+    ("GBPCAD=X", "GBP/CAD"),
+    ("GBPCHF=X", "GBP/CHF"),
+    ("GBPNZD=X", "GBP/NZD"),
+    ("AUDCAD=X", "AUD/CAD"),
+    ("AUDCHF=X", "AUD/CHF"),
+    ("AUDNZD=X", "AUD/NZD"),
+    ("CADJPY=X", "CAD/JPY"),
+    ("CHFJPY=X", "CHF/JPY"),
+    ("NZDJPY=X", "NZD/JPY"),
+    ("NZDCAD=X", "NZD/CAD"),
+    ("CADCHF=X", "CAD/CHF"),
+]
+
+
+@dataclass
+class TripleTouchCandidate:
+    symbol: str
+    name: Optional[str]
+    direction: str  # "short" = rejected from resistance | "long" = bounced from support
+    price: float
+    level: float  # where the touches cluster: median of the touch candles' highs (resistance) / lows (support)
+    zone_edge: float  # the other side of the zone — any touch reached at least this far
+    touch_count: int
+    at_level: bool  # price is back at the level right now (another test in progress)
+    distance_pct: float  # current close's distance from the level, % of price
+    touch_times: list[str]  # the extreme candle of each touch, oldest first
+    candle_time: str
+
+
+@dataclass
+class TripleTouchScanResult:
+    market: str
+    scanned_at: str
+    universe_count: int
+    results: list[TripleTouchCandidate]
+
+
+def _find_repeated_rejections(
+    tops: pd.Series, bottoms: pd.Series, closes: pd.Series, unit: float
+) -> Optional[tuple[float, float, list[int], bool]]:
+    """Written for the resistance case: price climbs into a zone just under a level and
+    falls away from it, again and again. The support case reuses it on negated prices.
+
+    A "touch" is a run of consecutive candles whose top reaches the zone; it only ends
+    once price has dropped at least TRIPLE_TOUCH_PULLBACK_UNITS away from the level, so
+    a few candles hovering at the level count once, not several times. The zone hangs
+    from the highest top since the first touch, which also means nothing has broken
+    above it since — but the level reported is the median of the touch tops, i.e. where
+    price actually kept turning, so one wick poking past the others doesn't drag the
+    level line away from them. Tries each recent bar as the first touch and keeps the
+    earliest one that yields enough completed rejections inside the span/age limits.
+
+    The first touch must be price rising into the level (its top above the candle
+    before it). Price sliding down into the zone from above is falling *through* the
+    level, not being rejected by it. Later touches always come up from a pullback.
+
+    Returns (level, zone_edge, touch bar positions, at_level) or None."""
+    top = tops.to_numpy()
+    bottom = bottoms.to_numpy()
+    close = closes.to_numpy()
+    n = len(top)
+    earliest = max(1, n - TRIPLE_TOUCH_MAX_SPAN - TRIPLE_TOUCH_MAX_AGE - 1)
+
+    for start in range(earliest, n):
+        level = top[start:].max()
+        zone_edge = level - TRIPLE_TOUCH_ZONE_UNITS * unit
+        if top[start] < zone_edge:
+            continue
+        pullback_line = level - TRIPLE_TOUCH_PULLBACK_UNITS * unit
+
+        touches: list[int] = []
+        armed = True  # ready to register a new touch (price has pulled back since the last one)
+        for i in range(start, n):
+            touched_now = top[i] >= zone_edge
+            if touched_now:
+                if armed:
+                    touches.append(i)
+                    armed = False
+                elif top[i] > top[touches[-1]]:
+                    touches[-1] = i
+            # A single candle can both tag the level and fall away from it, but a wick
+            # alone doesn't say which came first — only trusted when it *closes* past
+            # the pullback line (a real rejection candle).
+            if not armed and bottom[i] <= pullback_line and (not touched_now or close[i] <= pullback_line):
+                armed = True
+
+        if top[touches[0]] <= top[touches[0] - 1]:
+            continue
+        rejections = len(touches) if armed else len(touches) - 1
+        if rejections < TRIPLE_TOUCH_MIN_REJECTIONS:
+            continue
+        if touches[-1] - touches[0] > TRIPLE_TOUCH_MAX_SPAN:
+            continue
+        if n - 1 - touches[-1] > TRIPLE_TOUCH_MAX_AGE:
+            continue
+        touch_level = float(pd.Series(top[touches]).median())
+        return touch_level, float(zone_edge), touches, not armed
+
+    return None
+
+
+def _detect_triple_touch(df: pd.DataFrame) -> Optional[tuple[str, float, float, list[pd.Timestamp], bool]]:
+    """Hourly candles that hit the same price area at least three times within a short
+    stretch and got pushed back each time — but only in the direction of the trend, like
+    the setup this models: rejections from resistance while price is below a falling
+    EMA50 (short), or bounces off support while it's above a rising EMA50 (long). A
+    support "bounce" in a downtrend is just a pause on the way down.
+
+    Returns (direction, level, zone_edge, touch candle times, at_level) or None."""
+    # +1 for the current candle, +1 so the earliest possible first touch still has a
+    # candle before it to compare against.
+    window_len = TRIPLE_TOUCH_MAX_SPAN + TRIPLE_TOUCH_MAX_AGE + 2
+    if len(df) < max(TRIPLE_TOUCH_UNIT_BARS, window_len, settings.technical_ema_period + TRIPLE_TOUCH_EMA_SLOPE_BARS):
+        return None
+
+    unit = float((df["High"] - df["Low"]).iloc[-TRIPLE_TOUCH_UNIT_BARS:].mean())
+    if not unit > 0:
+        return None
+
+    ema = df["Close"].ewm(span=settings.technical_ema_period, adjust=False).mean()
+    last_close = float(df["Close"].iloc[-1])
+    last_ema = float(ema.iloc[-1])
+    earlier_ema = float(ema.iloc[-1 - TRIPLE_TOUCH_EMA_SLOPE_BARS])
+    downtrend = last_close < last_ema and last_ema < earlier_ema
+    uptrend = last_close > last_ema and last_ema > earlier_ema
+    if not (downtrend or uptrend):
+        return None
+
+    window = df.iloc[-window_len:]
+    found: list[tuple[str, float, float, list[int], bool]] = []
+    if downtrend:
+        resistance = _find_repeated_rejections(window["High"], window["Low"], window["Close"], unit)
+        if resistance:
+            found.append(("short", *resistance))
+    if uptrend:
+        support = _find_repeated_rejections(-window["Low"], -window["High"], -window["Close"], unit)
+        if support:
+            level, zone_edge, touches, at_level = support
+            found.append(("long", -level, -zone_edge, touches, at_level))
+    if not found:
+        return None
+
+    direction, level, zone_edge, touches, at_level = found[0]  # the trends are exclusive, so at most one side
+    if abs(last_close - level) > TRIPLE_TOUCH_MAX_DISTANCE_UNITS * unit:
+        return None
+    return direction, level, zone_edge, [window.index[p] for p in touches], at_level
+
+
+def _round_sig(value: float) -> float:
+    # 6 significant digits covers a $500 stock, a 1.37245 forex rate and a 0.0000123 coin.
+    return float(f"{value:.6g}")
+
+
+def _evaluate_triple_touch(symbol: str, name: Optional[str], market: str) -> Optional[TripleTouchCandidate]:
+    try:
+        df = yf.Ticker(symbol).history(interval=TRIPLE_TOUCH_TIMEFRAME, period=TRIPLE_TOUCH_HISTORY_PERIOD)
+    except Exception:
+        logger.warning("Triple-touch scan: history fetch failed for %s", symbol)
+        return None
+
+    if df is None or df.empty:
+        return None
+    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+    if df.empty:
+        return None
+    last_close = float(df["Close"].iloc[-1])
+    if market == "stocks":
+        if last_close < TRIPLE_TOUCH_MIN_STOCK_PRICE:
+            return None
+        # Median, not mean — one gap candle (e.g. the buyout announcement) would
+        # otherwise mask weeks of flat-lined bars.
+        typical_range = (df["High"] - df["Low"]).iloc[-TRIPLE_TOUCH_UNIT_BARS:].median()
+        if typical_range < last_close * TRIPLE_TOUCH_MIN_STOCK_UNIT_PCT:
+            return None
+
+    detected = _detect_triple_touch(df)
+    if detected is None:
+        return None
+    direction, level, zone_edge, touch_times, at_level = detected
+
+    def iso(ts: pd.Timestamp) -> str:
+        return ts.to_pydatetime().astimezone(timezone.utc).isoformat()
+
+    return TripleTouchCandidate(
+        symbol=symbol,
+        name=name,
+        direction=direction,
+        price=_round_sig(last_close),
+        level=_round_sig(level),
+        zone_edge=_round_sig(zone_edge),
+        touch_count=len(touch_times),
+        at_level=at_level,
+        distance_pct=round(abs(last_close - level) / last_close * 100, 2),
+        touch_times=[iso(ts) for ts in touch_times],
+        candle_time=iso(df.index[-1]),
+    )
+
+
+def scan_triple_touch_1h(market: str) -> TripleTouchScanResult:
+    """On-demand scan (not scheduled, not persisted) for the triple-rejection pattern on
+    hourly candles, over liquid Nasdaq stocks, major + cross forex pairs, or the curated
+    crypto list, depending on `market`."""
+    if market not in TRIPLE_TOUCH_MARKETS:
+        raise ValueError(f"market must be one of {TRIPLE_TOUCH_MARKETS}")
+
+    if market == "stocks":
+        universe = _get_stock_universe(settings.triple_touch_stock_universe_size)
+    elif market == "forex":
+        universe = FOREX_PAIRS + TRIPLE_TOUCH_EXTRA_FOREX
+    else:
+        universe = [(sym, sym.removesuffix("-USD")) for sym in CRYPTO_SYMBOLS]
+
+    results: list[TripleTouchCandidate] = []
+    with ThreadPoolExecutor(max_workers=settings.technical_scan_workers) as pool:
+        futures = [pool.submit(_evaluate_triple_touch, sym, name, market) for sym, name in universe]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result is not None:
+                results.append(result)
+
+    results.sort(key=lambda c: c.touch_times[-1], reverse=True)
+
+    return TripleTouchScanResult(
+        market=market,
+        scanned_at=datetime.now(timezone.utc).isoformat(),
+        universe_count=len(universe),
+        results=results,
     )
 
 

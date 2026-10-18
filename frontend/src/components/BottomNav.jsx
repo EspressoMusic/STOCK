@@ -1,20 +1,26 @@
 import { useNav } from "../context/NavContext";
+import { CENTER_TAB } from "../features";
 import { useLang } from "../context/LangContext";
 
-const TAB_IDS = ["chart-scan", "portfolio", "interesting"];
-const CENTER_ID = "portfolio";
+const TAB_IDS = ["chart-scan", CENTER_TAB, "interesting"];
+const CENTER_ID = CENTER_TAB;
 
 const LABEL_KEYS = {
   portfolio: "nav.portfolio",
+  watchlist: "nav.watchlist",
   "chart-scan": "nav.chartScan",
   interesting: "nav.interesting",
 };
 
 const ICONS = {
   portfolio: <path d="M4 8a1 1 0 0 1 1-1h2.2l1-1.6A1 1 0 0 1 9.05 5h5.9a1 1 0 0 1 .85.4L16.8 7H19a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8Z" />,
+  watchlist: <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z" />,
   "chart-scan": <path d="M3 3v18h18M7 15l4-6 3 4 5-8" />,
   interesting: (
-    <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-4-4" />
+    </>
   ),
 };
 

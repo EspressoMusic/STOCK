@@ -81,13 +81,12 @@ export default function TechnicalPanel() {
               {t("tech.forexPairs")}
             </div>
           )}
-          {scanning && <div className="warn">{t("tech.firstScanWarn")}</div>}
+          {scanning && !result && <div className="warn">{t("tech.firstScanWarn")}</div>}
         </div>
       </div>
 
       {loading && <p className="state-msg">{t("common.loading")}</p>}
       {!loading && error && <p className="state-msg">{error}</p>}
-      {!loading && !error && !result && <p className="state-msg">{t("tech.noScanYet")}</p>}
       {!loading && !error && result && totalMatches === 0 && <p className="state-msg">{t("tech.noMatchesRsiEma")}</p>}
 
       {result && totalMatches > 0 && (

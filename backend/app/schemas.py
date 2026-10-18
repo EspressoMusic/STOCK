@@ -170,6 +170,51 @@ class EmaDoubleTouchForexScanOut(BaseModel):
     forex: list[EmaDoubleTouchForexCandidateOut]
 
 
+class PatternCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: Optional[str] = None
+    direction: str
+    price: float
+    ema: float
+    ema_period: int
+    zone_low: float
+    zone_high: float
+    touch_count: int
+    last_touch_time: str
+    candle_time: str
+
+
+class PatternScanOut(BaseModel):
+    scanned_at: str
+    universe_stock_count: int
+    stocks: list[PatternCandidateOut]
+
+
+class TripleTouchCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: Optional[str] = None
+    direction: str
+    price: float
+    level: float
+    zone_edge: float
+    touch_count: int
+    at_level: bool
+    distance_pct: float
+    touch_times: list[str]
+    candle_time: str
+
+
+class TripleTouchScanOut(BaseModel):
+    market: str
+    scanned_at: str
+    universe_count: int
+    results: list[TripleTouchCandidateOut]
+
+
 class CandleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -195,6 +240,27 @@ class QuoteOut(BaseModel):
     market_cap: Optional[int] = None
 
 
+class StockProfileOut(BaseModel):
+    """On-demand version of a scan result's detail fields, for stocks that reach the
+    detail modal from a list that doesn't carry the AI explanation (e.g. triple-touch)."""
+    symbol: str
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    price: Optional[float] = None
+    change_percent: Optional[float] = None
+    market_cap: Optional[int] = None
+    avg_volume: Optional[int] = None
+    target_mean_price: Optional[float] = None
+    target_high_price: Optional[float] = None
+    target_low_price: Optional[float] = None
+    recommendation_key: Optional[str] = None
+    num_analyst_opinions: Optional[int] = None
+    ai_summary: Optional[str] = None
+    company_blurb: Optional[str] = None
+    news: list[NewsItemOut] = []
+
+
 class SymbolMatchOut(BaseModel):
     symbol: str
     name: Optional[str] = None
@@ -214,6 +280,9 @@ class MarketCandidateOut(BaseModel):
     change_percent: Optional[float] = None
     volume: Optional[int] = None
     market_cap: Optional[int] = None
+    fifty_two_week_high: Optional[float] = None
+    fifty_two_week_low: Optional[float] = None
+    news: list[NewsItemOut] = []
 
 
 class CryptoScanOut(BaseModel):
@@ -268,3 +337,48 @@ class NewsDigestOut(BaseModel):
 
 class WorldNewsOut(BaseModel):
     news: list[NewsItemOut] = []
+
+
+class DailyDigestHoldingIn(BaseModel):
+    symbol: str
+    shares: float
+    avg_price: float
+    price: Optional[float] = None
+    change_percent: Optional[float] = None
+
+
+class DailyDigestIn(BaseModel):
+    cash: float
+    holdings: list[DailyDigestHoldingIn] = []
+
+
+class DailyDigestOut(BaseModel):
+    summary: str
+    generated_at: datetime
+
+
+class BillingStatusOut(BaseModel):
+    plan: str  # "free" | "pro"
+    ai_enabled: bool
+    paddle_client_token: str = ""
+    paddle_price_id: str = ""
+    paddle_environment: str = "sandbox"
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str  # "google" | "guest"
+    email: Optional[str] = None
+    name: Optional[str] = None
+    picture: Optional[str] = None
+
+
+class GoogleAuthIn(BaseModel):
+    credential: str
+
+
+class AuthResultOut(BaseModel):
+    token: str
+    user: UserOut

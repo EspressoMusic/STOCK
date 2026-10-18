@@ -1,27 +1,91 @@
 import { useEffect, useState } from "react";
-import { formatPrice, formatPercent, formatCompact, formatRelative } from "../format";
+import { formatPrice, formatPercent, formatRelative } from "../format";
 import { useLang } from "../context/LangContext";
-import { getNewsDigest } from "../api";
+import { useNav } from "../context/NavContext";
+import { getNewsDigest, getStockProfile } from "../api";
 import { getHotSignal } from "../lib/hotSignal";
-import StockChartModal from "./StockChartModal";
+import useWatchlist from "../hooks/useWatchlist";
 
-export default function StockDetailModal({ stock, direction, onClose }) {
+const FRESH_NEWS_PHRASE = "כותרות חדשות טריות";
+
+function renderSentimentText(text, onNewsPhraseClick) {
+  const idx = text.indexOf(FRESH_NEWS_PHRASE);
+  if (idx === -1 || !onNewsPhraseClick) return text;
+  const before = text.slice(0, idx);
+  const after = text.slice(idx + FRESH_NEWS_PHRASE.length);
+  return (
+    <>
+      {before}
+      <strong
+        className="ai-summary-news-link"
+        onClick={onNewsPhraseClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onNewsPhraseClick();
+          }
+        }}
+      >
+        {FRESH_NEWS_PHRASE}
+      </strong>
+      {after}
+    </>
+  );
+}
+
+function withoutNulls(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v != null));
+}
+
+export default function StockDetailModal({ stock: baseStock, direction: baseDirection, onClose }) {
   const { t, lang } = useLang();
-  const [chartOpen, setChartOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const { goTo } = useNav();
+  const { isSaved, toggle } = useWatchlist();
+  const saved = isSaved(baseStock.symbol);
+
+  // Lists other than the movers scan (triple-touch, cap/crypto) don't carry the AI
+  // explanation, so fetch it on open and layer it over what the list already had.
+  const needsProfile = baseStock.company_blurb == null && baseStock.ai_summary == null;
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(needsProfile);
+
+  useEffect(() => {
+    if (!needsProfile) return;
+    let cancelled = false;
+    getStockProfile(baseStock.symbol)
+      .then((p) => {
+        if (!cancelled) setProfile(p);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseStock.symbol, needsProfile]);
+
+  const stock = profile ? { ...baseStock, ...withoutNulls(profile) } : baseStock;
+  const direction = baseDirection ?? ((stock.change_percent ?? 0) < 0 ? "losers" : "gainers");
+
+  const [newsModalOpen, setNewsModalOpen] = useState(false);
   const [newsDigest, setNewsDigest] = useState(null);
   const [newsDigestLoading, setNewsDigestLoading] = useState(false);
 
+  const hasNews = !!(stock.news && stock.news.length > 0);
+
   useEffect(() => {
-    if (!advancedOpen || newsDigest !== null || newsDigestLoading) return;
-    if (!stock.news || stock.news.length === 0) return;
+    if (!newsModalOpen || newsDigest !== null || newsDigestLoading) return;
+    if (!hasNews) return;
     setNewsDigestLoading(true);
     getNewsDigest(stock.symbol, stock.news)
       .then((res) => setNewsDigest(res.summary))
       .catch(() => setNewsDigest(""))
       .finally(() => setNewsDigestLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [advancedOpen]);
+  }, [newsModalOpen]);
 
   const newsDigestLines = (newsDigest || "")
     .split("\n")
@@ -34,22 +98,12 @@ export default function StockDetailModal({ stock, direction, onClose }) {
   const hotSignal = getHotSignal(stock);
 
   return (
+    <>
     <div className="chart-modal-overlay" onClick={onClose}>
       <div className="chart-modal stock-detail-modal" onClick={(e) => e.stopPropagation()}>
         <div className="chart-modal-head">
-          <button
-            className="stock-detail-chart-icon-btn"
-            onClick={() => setChartOpen(true)}
-            aria-label={t("common.showChart")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3v18h18" />
-              <path d="M7 15l4-6 3 4 5-8" />
-            </svg>
-          </button>
           <div className="chart-modal-title">
             <span className="symbol">{stock.symbol}</span>
-            {advancedOpen && stock.name && <span className="name">{stock.name}</span>}
           </div>
           <button className="chart-modal-close" onClick={onClose} aria-label={t("common.close")}>
             ✕
@@ -71,6 +125,8 @@ export default function StockDetailModal({ stock, direction, onClose }) {
             </div>
           )}
 
+          {needsProfile && profileLoading && <p className="muted">{t("stockDetail.loadingProfile")}</p>}
+
           {stock.company_blurb && (
             <div className="ai-bubble company-blurb-bubble">
               <span className="ai-label">{t("stockDetail.about")}</span>
@@ -81,77 +137,76 @@ export default function StockDetailModal({ stock, direction, onClose }) {
           {stock.ai_summary && (
             <div className="ai-bubble">
               <span className="ai-label">{t("stockDetail.sentiment")}</span>
-              <p>{stock.ai_summary}</p>
+              <p>
+                {renderSentimentText(
+                  stock.ai_summary,
+                  hasNews ? () => setNewsModalOpen(true) : null
+                )}
+              </p>
             </div>
           )}
 
-          {!advancedOpen && (
+          <div className="stock-detail-actions">
             <button
-              className="stock-detail-advanced-toggle"
-              onClick={() => setAdvancedOpen(true)}
+              className="stock-detail-chart-icon-btn"
+              onClick={() => {
+                goTo("chart-scan", { symbol: stock.symbol });
+                onClose();
+              }}
+              aria-label={t("common.showChart")}
             >
-              {t("stockDetail.showAdvanced")}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 3v18h18" />
+                <path d="M7 15l4-6 3 4 5-8" />
+              </svg>
             </button>
-          )}
-
-          {advancedOpen && (
-            <div className="stock-detail-advanced">
-              <div className="detail-grid">
-                <div className="detail-item">
-                  <span className="detail-label">{t("common.volume")}</span>
-                  <span>{formatCompact(stock.volume)}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">{t("common.marketCap")}</span>
-                  <span>{stock.market_cap ? `$${formatCompact(stock.market_cap)}` : "—"}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">{t("common.week52High")}</span>
-                  <span>{formatPrice(stock.fifty_two_week_high)}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">{t("common.week52Low")}</span>
-                  <span>{formatPrice(stock.fifty_two_week_low)}</span>
-                </div>
-              </div>
-
-              <div className="analyst-block">
-                <span className="detail-label">{t("common.analystTarget")}</span>
-                {stock.target_mean_price ? (
-                  <p>
-                    {formatPrice(stock.target_mean_price)} ({formatPrice(stock.target_low_price)}–
-                    {formatPrice(stock.target_high_price)}) · {stock.num_analyst_opinions || 0}
-                    {stock.recommendation_key ? ` · ${stock.recommendation_key}` : ""}
-                  </p>
-                ) : (
-                  <p className="muted">{t("common.noAnalystCoverage")}</p>
-                )}
-              </div>
-
-              <div className="news-block">
-                <span className="detail-label">{t("common.recentNews")}</span>
-                {stock.news && stock.news.length > 0 ? (
-                  newsDigestLoading ? (
-                    <p className="muted">{t("common.summarizingNews")}</p>
-                  ) : newsDigestLines.length > 0 ? (
-                    <ul className="news-digest-list">
-                      {newsDigestLines.map((line, i) => (
-                        <li key={i}>{line}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="muted">{t("common.noNews")}</p>
-                  )
-                ) : (
-                  <p className="muted">{t("common.noNews")}</p>
-                )}
-              </div>
-            </div>
-          )}
+            <button
+              className={`stock-detail-chart-icon-btn watch-star-btn${saved ? " is-saved" : ""}`}
+              onClick={() => toggle(stock.symbol, stock.name)}
+              aria-pressed={saved}
+              aria-label={saved ? t("watchlist.remove") : t("watchlist.save")}
+              title={saved ? t("watchlist.remove") : t("watchlist.save")}
+            >
+              <svg viewBox="0 0 24 24" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
-
-      {chartOpen && <StockChartModal symbol={stock.symbol} name={stock.name} onClose={() => setChartOpen(false)} />}
     </div>
+
+    {newsModalOpen && (
+      <div className="chart-modal-overlay" onClick={() => setNewsModalOpen(false)}>
+        <div className="chart-modal news-summary-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="chart-modal-head">
+            <div className="chart-modal-title">
+              <span className="symbol">{t("common.recentNews")}</span>
+            </div>
+            <button
+              className="chart-modal-close"
+              onClick={() => setNewsModalOpen(false)}
+              aria-label={t("common.close")}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="chart-modal-body">
+            {newsDigestLoading ? (
+              <p className="muted">{t("common.summarizingNews")}</p>
+            ) : newsDigestLines.length > 0 ? (
+              <ul className="news-digest-list">
+                {newsDigestLines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">{t("common.noNews")}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -9,11 +9,13 @@ and always re-sort client-side on a live field before trimming to the final list
 import re
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import yfinance as yf
 from yfinance import EquityQuery
+
+from .enrichment import NewsItem, parse_news_item
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,7 @@ class ScanCandidate:
     fifty_two_week_high: Optional[float] = None
     fifty_two_week_low: Optional[float] = None
     fifty_two_week_change_percent: Optional[float] = None
+    news: list[NewsItem] = field(default_factory=list)  # only populated for crypto candidates
 
 
 @dataclass
@@ -224,12 +227,23 @@ def scan_broken_stocks(
 
 def _crypto_quote_to_candidate(symbol: str) -> Optional[ScanCandidate]:
     try:
-        fi = yf.Ticker(symbol).fast_info
+        ticker = yf.Ticker(symbol)
+        fi = ticker.fast_info
         price = fi.get("lastPrice")
         prev_close = fi.get("previousClose")
         if price is None:
             return None
         change_percent = (price - prev_close) / prev_close * 100 if prev_close else None
+
+        news: list[NewsItem] = []
+        try:
+            for item in (ticker.news or [])[:4]:
+                parsed = parse_news_item(item)
+                if parsed:
+                    news.append(parsed)
+        except Exception:
+            logger.warning("Crypto news fetch failed for %s", symbol)
+
         return ScanCandidate(
             symbol=symbol,
             name=symbol.replace("-USD", ""),
@@ -237,6 +251,9 @@ def _crypto_quote_to_candidate(symbol: str) -> Optional[ScanCandidate]:
             change_percent=change_percent,
             volume=fi.get("lastVolume"),
             market_cap=fi.get("marketCap"),
+            fifty_two_week_high=fi.get("yearHigh"),
+            fifty_two_week_low=fi.get("yearLow"),
+            news=news,
         )
     except Exception:
         logger.warning("Crypto quote fetch failed for %s", symbol)

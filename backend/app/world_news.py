@@ -7,7 +7,7 @@ import logging
 
 import yfinance as yf
 
-from .enrichment import NewsItem, _news_item_from_raw
+from .enrichment import NewsItem, parse_news_item
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def get_world_news(limit: int = 5) -> list[NewsItem]:
             logger.warning("Failed to fetch world news for %s", symbol, exc_info=True)
             continue
         for raw in raw_news:
-            parsed = _news_item_from_raw(raw)
+            parsed = parse_news_item(raw)
             if not parsed or parsed.title in seen_titles:
                 continue
             seen_titles.add(parsed.title)

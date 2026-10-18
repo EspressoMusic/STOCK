@@ -41,7 +41,18 @@ def _fallback_summary(
         parts.append("ויש עליה כותרות חדשות טריות שכדאי לבדוק")
     else:
         parts.append("אין הרבה כיסוי אנליסטים או חדשות כרגע, אז זה מסוכן יותר לנחש")
-    return " ".join(parts) + "."
+
+    if enrichment.target_mean_price and price:
+        if enrichment.target_mean_price > price * 1.1:
+            parts.append("אז אישית זה נראה כרגע כמו הזדמנות קנייה")
+        elif enrichment.target_mean_price < price * 0.9:
+            parts.append("אז אישית הייתי נזהר וקרוב יותר למכירה או הימנעות")
+        else:
+            parts.append("אז אישית הייתי מחכה ורואה לאן זה מתפתח לפני שמחליטים")
+    else:
+        parts.append("אז בלי יותר מידע אישית הייתי מחכה ורואה לאן זה מתפתח לפני שמחליטים")
+
+    return " ".join(parts)
 
 
 def _build_prompt(
@@ -94,17 +105,29 @@ def _build_prompt(
 
 
 _SYSTEM_PROMPT = """\
-אתה חבר שמבין במניות ומסביר לחבר שלו במשפט אחד קצר, ישיר וכן מה דעתך על הסיכוי \
+אתה חבר שמבין במניות ומסביר לחבר שלו בקצרה, ישיר וכן, מה דעתך על הסיכוי \
 של מניה להתאושש. יש שני סוגי מקרים: מניה שהתרסקה או זינקה היום, או מניה מרשימת \
 "פני-סטוקים שבורים" שכבר זמן רב שווה כמעט כלום ולא בהכרח זזה היום — במקרה הזה \
 תתייחס לתמונה הכללית (כמה זמן היא כבר למטה, סיכון להימחק מהמסחר אם המחיר מתחת \
-לדולר) ולא רק ל"היום". תדבר בעברית פשוטה, בגובה העיניים, בלי ז'רגון פיננסי \
-מסובך, כאילו אתה שולח הודעת וואטסאפ לחבר. תן תשובה מאוזנת - אל תבטיח כלום ואל \
-תיתן ייעוץ השקעות פורמלי, רק תחושת בטן מבוססת על הנתונים שקיבלת (מגמת מחיר, יעד \
-אנליסטים אם יש, וכותרות חדשות אם יש). אם אין מספיק מידע (בלי אנליסטים ובלי \
-חדשות), תגיד את זה בכנות ותציין שזה הימור עיוור יותר. משפט אחד או שניים לכל \
-היותר, בלי מבוא ובלי סיכום. אל תוסיף בסוף איזה משפט גנרי כמו "תבדוק בעצמך" או \
-"זו לא המלצת השקעה" — המשתמש כבר יודע את זה, תתמקד רק בתוכן."""
+לדולר) ולא רק ל"היום". תדבר בעברית פשוטה בלבד, בגובה העיניים, בלי ז'רגון פיננסי \
+מסובך, כאילו אתה שולח הודעת וואטסאפ לחבר. אסור שבתשובה שלך תופיע ולו מילה אחת \
+באנגלית או קיצור באנגלית - תרגם כל מונח לעברית (כולל דירוגי אנליסטים כמו buy/ \
+hold/sell -> קנייה/החזקה/מכירה). התבסס אך ורק על המספרים והעובדות שכתובים \
+במפורש בנתונים שקיבלת למטה (מחיר, אחוז שינוי, יעד אנליסטים אם יש, כותרות חדשות \
+אם יש) - אסור לך להוסיף שום עובדה, אירוע, שמועה או "ידע כללי" על החברה שאינו \
+כתוב שם במפורש, גם אם נדמה לך שאתה מכיר את החברה ממקור אחר; אם אתה לא בטוח \
+במשהו, אל תכתוב אותו. אל תמציא נתונים ואל תכליל באופן גורף. אם אין מספיק מידע \
+(בלי אנליסטים ובלי חדשות), תגיד את זה בכנות ותציין שזה הימור עיוור יותר. בסיום \
+דבריך תן כיוון ברור וחד-משמעי אחד מתוך שלוש אפשרויות בלבד, ותבסס את הבחירה \
+ישירות על ההיגיון הבא: אם יעד האנליסטים גבוה משמעותית מהמחיר הנוכחי או שהחדשות \
+חיוביות בבירור - זה נשמע כמו הזדמנות קנייה; אם יעד האנליסטים נמוך משמעותית \
+מהמחיר או שהחדשות שליליות בבירור - עדיף למכור/להימנע; ואם הנתונים חסרים, סותרים \
+או לא חד-משמעיים - עדיף לחכות ולראות לאן זה מתפתח (זו ברירת המחדל הבטוחה כשאין \
+מספיק אינדיקציה ברורה לכיוון אחר). נסח את זה כתחושת בטן אישית ולא כהמלצה \
+פורמלית ("אישית הייתי..." או דומה לזה), אבל אל תתחמק ממתן כיוון. שניים עד שלושה \
+משפטים לכל היותר, בלי מבוא ובלי סיכום. אל תוסיף בסוף איזה משפט גנרי כמו "תבדוק \
+בעצמך" או "זו לא המלצת השקעה" — המשתמש כבר יודע את זה, תתמקד רק בתוכן. אל תסיים \
+את התשובה בנקודה."""
 
 
 def generate_outlook(
@@ -132,7 +155,7 @@ def generate_outlook(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.6,
-            max_tokens=120,
+            max_tokens=180,
         )
         text = (resp.choices[0].message.content or "").strip()
         return text or _fallback_summary(symbol, price, change_percent, direction, enrichment, fifty_two_week_change_percent)
@@ -141,22 +164,51 @@ def generate_outlook(
         return _fallback_summary(symbol, price, change_percent, direction, enrichment, fifty_two_week_change_percent)
 
 
+_SECTOR_HE = {
+    "Technology": "טכנולוגיה",
+    "Healthcare": "בריאות",
+    "Financial Services": "שירותים פיננסיים",
+    "Consumer Cyclical": "מוצרי צריכה מחזוריים",
+    "Consumer Defensive": "מוצרי צריכה בסיסיים",
+    "Industrials": "תעשייה",
+    "Communication Services": "שירותי תקשורת",
+    "Energy": "אנרגיה",
+    "Utilities": "שירותים ציבוריים",
+    "Real Estate": 'נדל"ן',
+    "Basic Materials": "חומרי גלם",
+}
+
+
 def _fallback_company_blurb(
     name: Optional[str],
     sector: Optional[str],
     industry: Optional[str],
 ) -> str:
-    if industry and sector:
-        return f"{name or 'החברה'} פועלת בתחום {industry}, במגזר {sector}."
-    if sector:
-        return f"{name or 'החברה'} פועלת במגזר {sector}."
-    return "אין מידע זמין על עיסוק החברה."
+    sector_he = _SECTOR_HE.get(sector) if sector else None
+    if sector_he:
+        return f"החברה פועלת בסקטור {sector_he}"
+    return "אין מידע זמין על עיסוק החברה"
 
 
 _COMPANY_SYSTEM_PROMPT = """\
-אתה מסביר במשפט אחד קצר וברור, בעברית פשוטה, במה עוסקת חברה - על סמך תקציר \
-עסקי שתקבל באנגלית. בלי ז'רגון, בלי דעה, בלי המלצת השקעה, רק עובדה: מה החברה \
-עושה בפועל. משפט אחד בלבד."""
+אתה מסביר בעברית פשוטה וברורה בלבד, בפסקה מורחבת של 5-7 משפטים קצרים, במה \
+עוסקת חברה - על סמך מידע שתקבל באנגלית (תקציר עסקי, או לפחות סקטור/תחום \
+פעילות). תן הסבר מפורט, עשיר ומועיל ככל שהמידע מאפשר, ותכסה כמה שיותר מהנקודות \
+הבאות אם יש עליהן מידע בתקציר: מה החברה עושה בפועל ואיך היא מרוויחה כסף, אילו \
+מוצרים או שירותים עיקריים היא מציעה, מי הלקוחות או השוק שלה, באילו מדינות או \
+אזורים היא פועלת, ומה מייחד אותה מול מתחרות בתחום (אם זה מוזכר). תרגם כל מונח \
+באנגלית לעברית, כולל שמות סקטורים ותחומי פעילות (למשל Healthcare -> בריאות, \
+Biotechnology -> ביוטכנולוגיה) - אסור שבתשובה שלך תופיע ולו מילה אחת באנגלית \
+או קיצור באנגלית, אפילו לא שם מוצר או ראשי תיבות. אל תכתוב את השם המשפטי של \
+החברה באנגלית (כולל סיומות כמו Inc/Corp/Ltd) - תתייחס אליה בתור "החברה". כתוב \
+במשפטים קצרים וברורים, כאילו אתה מסביר למישהו שלא מכיר בכלל את התחום - בלי \
+ז'רגון פיננסי או מקצועי, בלי דעה אישית, בלי המלצת השקעה, רק עובדות על מה \
+שהחברה עושה. התבסס אך ורק על מה שכתוב במפורש בתקציר העסקי שקיבלת - אסור לך \
+להוסיף עובדות, נתונים, שמות מוצרים, לקוחות, מספרים או פרטים היסטוריים שאינם \
+כתובים שם, גם אם נדמה לך שאתה "מכיר" את החברה הזו ממקור אחר או מזיכרון כללי; \
+כל פרט בתשובה שלך חייב להיות ניתן לאיתור ישירות בטקסט שקיבלת. אם משהו לא ידוע \
+או לא כתוב במפורש, פשוט דלג עליו במקום לנחש או להשלים אותו. שמור על הפסקה \
+זורמת וקריאה, לא רשימה של משפטים מנותקים."""
 
 
 def generate_company_blurb(
@@ -166,14 +218,24 @@ def generate_company_blurb(
     industry: Optional[str],
     business_summary: Optional[str],
 ) -> str:
-    if not business_summary:
-        return _fallback_company_blurb(name, sector, industry)
-
     client = get_client()
     if client is None:
         return _fallback_company_blurb(name, sector, industry)
 
-    user_prompt = f"חברה: {symbol} ({name or 'לא ידוע'})\nתקציר עסקי:\n{business_summary[:1500]}"
+    if business_summary:
+        user_prompt = f"חברה: {symbol} ({name or 'לא ידוע'})\nתקציר עסקי:\n{business_summary[:1500]}"
+    elif sector or industry:
+        user_prompt = (
+            f"חברה: {symbol} ({name or 'לא ידוע'})\n"
+            f"סקטור: {sector or 'לא ידוע'}\nתחום פעילות: {industry or 'לא ידוע'}\n"
+            "אין תקציר עסקי מפורט זמין - הסבר בפסקה של 3-4 משפטים, בעברית בלבד "
+            "(תרגם את שמות הסקטור/התחום), במה חברות בסקטור ובתחום הזה בדרך כלל "
+            "עוסקות, איך הן בדרך כלל מרוויחות כסף ומי בדרך כלל הלקוחות שלהן - "
+            "בהתבסס על הסקטור והתחום שלמעלה, בלי להמציא פרטים ספציפיים על החברה "
+            "עצמה שאין לך."
+        )
+    else:
+        return _fallback_company_blurb(name, sector, industry)
 
     try:
         resp = client.chat.completions.create(
@@ -183,7 +245,7 @@ def generate_company_blurb(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.4,
-            max_tokens=100,
+            max_tokens=420,
         )
         text = (resp.choices[0].message.content or "").strip()
         return text or _fallback_company_blurb(name, sector, industry)
@@ -250,6 +312,119 @@ _WORLD_NEWS_SYSTEM_PROMPT = """\
 
 def _fallback_world_news(news: list[dict]) -> list[dict]:
     return [{"title": n.get("title", ""), "impact": ""} for n in news]
+
+
+_DAILY_DIGEST_SYSTEM_PROMPT = """\
+אתה חבר שמבין במניות ומסכם למשתמש, בפסקה קצרה אחת של 3-5 משפטים, את מצב תיק \
+הדמו שלו יחד עם מה שקרה בשוק היום לפי הסריקות. תדבר בעברית פשוטה וישירה, כאילו \
+אתה שולח הודעת וואטסאפ לחבר בבוקר. תתייחס לרווח/הפסד הכולל של התיק, להחזקות \
+הבולטות (חיוביות ושליליות במיוחד), ולסריקות שמצאו משהו מעניין (עולים/יורדים \
+קיצוניים, מניות שבורות, איתותים טכניים) - רק אם יש בהם נתון שרלוונטי. אל תמציא \
+מספרים שלא קיבלת. אם אין החזקות פתוחות בתיק, תגיד את זה בקצרה ותעבור ישר \
+לסריקות. אל תיתן ייעוץ השקעות פורמלי, רק תמונת מצב. בלי מבוא ובלי סיכום כללי \
+בסוף, ישר לעניין."""
+
+
+def _build_daily_digest_prompt(cash: float, holdings: list[dict], scans: dict) -> str:
+    lines = [f"מזומן פנוי בתיק הדמו: ${cash:,.0f}"]
+
+    if holdings:
+        total_pnl = sum(
+            ((h.get("price") if h.get("price") is not None else h["avg_price"]) - h["avg_price"]) * h["shares"]
+            for h in holdings
+        )
+        lines.append(f"רווח/הפסד כולל בתיק כרגע: {total_pnl:+,.0f}$")
+        lines.append("החזקות פתוחות:")
+        for h in holdings:
+            side = "שורט" if h["shares"] < 0 else "לונג"
+            price = h.get("price")
+            parts = [f"- {h['symbol']} ({side}, {abs(h['shares']):g} יח')"]
+            if price is not None:
+                parts.append(f"מחיר נוכחי ${price:.2f} מול מחיר ממוצע ${h['avg_price']:.2f}")
+                pnl = (price - h["avg_price"]) * h["shares"]
+                parts.append(f"רווח/הפסד {pnl:+.0f}$")
+            if h.get("change_percent") is not None:
+                parts.append(f"שינוי היום {h['change_percent']:+.1f}%")
+            lines.append(" | ".join(parts))
+    else:
+        lines.append("אין כרגע החזקות פתוחות בתיק הדמו.")
+
+    lines.append("")
+    lines.append("סריקות אחרונות:")
+    gainers = scans.get("gainers") or []
+    losers = scans.get("losers") or []
+    if gainers:
+        lines.append(
+            "עלו הכי חזק היום: "
+            + ", ".join(f"{g['symbol']} ({g['change_percent']:+.0f}%)" for g in gainers)
+        )
+    if losers:
+        lines.append(
+            "נפלו הכי חזק היום: "
+            + ", ".join(f"{l['symbol']} ({l['change_percent']:+.0f}%)" for l in losers)
+        )
+    if scans.get("broken_count"):
+        lines.append(f"ברשימת המניות השבורות יש כרגע {scans['broken_count']} מניות.")
+    for label, key in [
+        ("פריצת EMA50", "ema_breakout_count"),
+        ("מגע EMA50 (4 שעות)", "ema_touch_4h_count"),
+        ("אסטרטגיית התבניות", "pattern_strategy_count"),
+    ]:
+        count = scans.get(key)
+        if count:
+            lines.append(f"סריקת {label} מצאה {count} מועמדים.")
+    if not gainers and not losers and not scans.get("broken_count"):
+        lines.append("אין נתוני סריקה טריים זמינים כרגע.")
+
+    return "\n".join(lines)
+
+
+def _fallback_daily_digest(cash: float, holdings: list[dict], scans: dict) -> str:
+    parts: list[str] = []
+    if holdings:
+        total_pnl = sum(
+            ((h.get("price") if h.get("price") is not None else h["avg_price"]) - h["avg_price"]) * h["shares"]
+            for h in holdings
+        )
+        parts.append(f"התיק שלך מכיל {len(holdings)} החזקות עם רווח/הפסד כולל של {total_pnl:+.0f}$")
+    else:
+        parts.append("אין לך כרגע החזקות פתוחות בתיק הדמו")
+    parts.append(f"ומזומן פנוי של ${cash:,.0f}")
+    gainers = scans.get("gainers") or []
+    losers = scans.get("losers") or []
+    if gainers:
+        parts.append("היום עלו הכי חזק " + ", ".join(g["symbol"] for g in gainers[:3]))
+    if losers:
+        parts.append("ונפלו הכי חזק " + ", ".join(l["symbol"] for l in losers[:3]))
+    return ". ".join(parts) + "."
+
+
+def generate_daily_digest(cash: float, holdings: list[dict], scans: dict) -> str:
+    """One short paragraph covering the whole demo portfolio + today's scan
+    highlights, so the user doesn't have to read every stock separately.
+    Portfolio state lives only in the browser (see usePortfolio.js) — the
+    frontend sends it on each call, this never touches the DB for it."""
+    client = get_client()
+    if client is None:
+        return _fallback_daily_digest(cash, holdings, scans)
+
+    user_prompt = _build_daily_digest_prompt(cash, holdings, scans)
+
+    try:
+        resp = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[
+                {"role": "system", "content": _DAILY_DIGEST_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.6,
+            max_tokens=280,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text or _fallback_daily_digest(cash, holdings, scans)
+    except Exception:
+        logger.warning("OpenAI daily digest generation failed", exc_info=True)
+        return _fallback_daily_digest(cash, holdings, scans)
 
 
 def generate_world_news_hebrew(news: list[dict]) -> list[dict]:

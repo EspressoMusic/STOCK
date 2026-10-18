@@ -22,6 +22,32 @@ export function getStatus() {
   return request("/api/status");
 }
 
+export function getBillingStatus() {
+  return request("/api/billing/status");
+}
+
+export function authWithGoogle(credential) {
+  return request("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ credential }),
+  });
+}
+
+export function authAsGuest() {
+  return request("/api/auth/guest", { method: "POST" });
+}
+
+export function getCurrentUser(token) {
+  return request("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function authLogout(token) {
+  return request("/api/auth/logout", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function getSectors() {
   return request("/api/sectors");
 }
@@ -76,12 +102,32 @@ export function runEmaDoubleTouchForexScan() {
   return request("/api/ema-double-touch-forex-scan/run", { method: "POST" });
 }
 
+export function getLatestPatternStrategyScan() {
+  return request("/api/pattern-strategy-scan/latest");
+}
+
+export function runPatternStrategyScan() {
+  return request("/api/pattern-strategy-scan/run", { method: "POST" });
+}
+
+export function getLatestTripleTouchScan(market) {
+  return request(`/api/triple-touch-scan/latest?market=${market}`);
+}
+
+export function runTripleTouchScan(market) {
+  return request(`/api/triple-touch-scan/run?market=${market}`, { method: "POST" });
+}
+
 export function getCandles(symbol, timeframe = "1h") {
   return request(`/api/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
 }
 
 export function getQuote(symbol) {
   return request(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
+}
+
+export function getStockProfile(symbol) {
+  return request(`/api/stock-profile?symbol=${encodeURIComponent(symbol)}`);
 }
 
 export function searchSymbols(query) {
@@ -96,16 +142,28 @@ export function getCapScan(size) {
   return request(`/api/cap-scan?size=${size}`);
 }
 
-export function getWorldNews(limit = 4) {
-  return request(`/api/world-news?limit=${limit}`);
-}
-
 export function getNewsDigest(symbol, news) {
   return request("/api/news-digest", {
     method: "POST",
     body: JSON.stringify({
       symbol,
       news: news.map((n) => ({ title: n.title, publisher: n.publisher })),
+    }),
+  });
+}
+
+export function getDailyDigest({ cash, holdings }) {
+  return request("/api/daily-digest", {
+    method: "POST",
+    body: JSON.stringify({
+      cash,
+      holdings: holdings.map((h) => ({
+        symbol: h.symbol,
+        shares: h.shares,
+        avg_price: h.avgPrice,
+        price: h.price ?? null,
+        change_percent: h.changePercent ?? null,
+      })),
     }),
   });
 }

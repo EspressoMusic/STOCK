@@ -73,6 +73,14 @@ def get_quote(symbol: str) -> Optional[Quote]:
             name = info.get("shortName") or info.get("longName")
             if market_cap is None:
                 market_cap = info.get("marketCap")
+            # fast_info derives previousClose from recent daily history, which is
+            # missing for thinly traded tickers; .info still carries Yahoo's own figure.
+            if change_percent is None:
+                change_percent = info.get("regularMarketChangePercent")
+            if change_percent is None:
+                info_prev = info.get("regularMarketPreviousClose") or info.get("previousClose")
+                if info_prev:
+                    change_percent = (price - info_prev) / info_prev * 100
         except Exception:
             pass
 

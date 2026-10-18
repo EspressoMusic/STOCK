@@ -8,6 +8,22 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
+    # Paddle billing — gates every AI feature behind a Pro subscription so the
+    # free tier can never generate OpenAI cost. Plan state lives in the DB
+    # (AppLicense row, flipped by the webhook); these are just Paddle's own
+    # identifiers. Leave all blank to keep the app permanently free/AI-off.
+    paddle_webhook_secret: str = ""
+    paddle_client_token: str = ""
+    paddle_price_id: str = ""
+    paddle_environment: str = "sandbox"  # "sandbox" | "production"
+    # Lets you flip the plan locally without a real Paddle webhook, for testing.
+    # Leave blank in production — anyone holding this token can turn AI on for free.
+    paddle_dev_override_token: str = ""
+
+    # Google sign-in — must match the frontend's VITE_GOOGLE_CLIENT_ID so the
+    # backend can verify that an ID token was actually issued for this app.
+    google_client_id: str = ""
+
     # Scan defaults
     scan_min_abs_percent: float = 8.0
     scan_min_volume: int = 100_000
@@ -33,6 +49,8 @@ class Settings(BaseSettings):
     technical_ema_period: int = 50
     technical_stock_universe_size: int = 250
     technical_scan_workers: int = 12
+    # The triple-touch (repeated rejection) scan casts a wider net than the other scans.
+    triple_touch_stock_universe_size: int = 500
 
     # Storage
     database_url: str = "sqlite:///./stockbot.db"

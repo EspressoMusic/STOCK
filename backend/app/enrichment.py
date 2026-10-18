@@ -70,7 +70,7 @@ def enrich_symbol(symbol: str, news_limit: int = 4) -> Enrichment:
     try:
         raw_news = ticker.news or []
         for item in raw_news[:news_limit]:
-            parsed = _news_item_from_raw(item)
+            parsed = parse_news_item(item)
             if parsed:
                 result.news.append(parsed)
     except Exception:
@@ -79,7 +79,7 @@ def enrich_symbol(symbol: str, news_limit: int = 4) -> Enrichment:
     return result
 
 
-def _news_item_from_raw(item: dict) -> Optional[NewsItem]:
+def parse_news_item(item: dict) -> Optional[NewsItem]:
     content = item.get("content", item)
     title = content.get("title")
     if not title:

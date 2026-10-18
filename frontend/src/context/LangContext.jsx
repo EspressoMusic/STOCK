@@ -3,10 +3,14 @@ import { translations } from "../i18n/translations";
 
 const LangContext = createContext(null);
 
+// Hebrew is the default for everyone; English only when picked in the app.
+// (The key moved from "lang" because older builds auto-saved "en" for any
+// English-language browser, which would otherwise keep overriding the default.)
+const STORAGE_KEY = "lang-v2";
+
 function getInitialLang() {
-  const stored = localStorage.getItem("lang");
-  if (stored === "he" || stored === "en") return stored;
-  return navigator.language?.startsWith("en") ? "en" : "he";
+  const stored = localStorage.getItem(STORAGE_KEY);
+  return stored === "en" ? "en" : "he";
 }
 
 function resolve(dict, path) {
@@ -17,7 +21,7 @@ export function LangProvider({ children }) {
   const [lang, setLang] = useState(getInitialLang);
 
   useEffect(() => {
-    localStorage.setItem("lang", lang);
+    localStorage.setItem(STORAGE_KEY, lang);
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "en" ? "ltr" : "rtl";
   }, [lang]);

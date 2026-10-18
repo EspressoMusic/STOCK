@@ -89,13 +89,12 @@ export default function EmaDoubleTouchForexPanel() {
               {totalMatches} {t("tech.matchesOf")} {result.universe_forex_count} {t("tech.forexPairs")}
             </div>
           )}
-          {scanning && <div className="warn">{t("tech.firstScanWarn")}</div>}
+          {scanning && !result && <div className="warn">{t("tech.firstScanWarn")}</div>}
         </div>
       </div>
 
       {loading && <p className="state-msg">{t("common.loading")}</p>}
       {!loading && error && <p className="state-msg">{error}</p>}
-      {!loading && !error && !result && <p className="state-msg">{t("tech.noScanYet")}</p>}
       {!loading && !error && result && totalMatches === 0 && <p className="state-msg">{t("tech.noMatchesDoubleTouch")}</p>}
 
       {result && totalMatches > 0 && (

@@ -1,11 +1,13 @@
 import json
 import logging
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -16,23 +18,32 @@ from .models import Scan
 from .scanner import VALID_SECTORS, scan_crypto, scan_by_cap
 from .schemas import (
     ScanOut, ScanSummaryOut, RunScanRequest, TechnicalScanOut, CandlesOut,
-    EmaBreakoutScanOut, EmaTouch4hScanOut, EmaDoubleTouchForexScanOut,
-    QuoteOut, MarketCandidateOut, CryptoScanOut, CapScanOut, ChartAnalysisOut,
+    EmaBreakoutScanOut, EmaTouch4hScanOut, EmaDoubleTouchForexScanOut, PatternScanOut, TripleTouchScanOut,
+    QuoteOut, StockProfileOut, MarketCandidateOut, CryptoScanOut, CapScanOut, ChartAnalysisOut,
     ChatReplyOut, NewsDigestIn, NewsDigestOut, NewsItemOut, WorldNewsOut,
-    SymbolSearchOut, SymbolMatchOut,
+    SymbolSearchOut, SymbolMatchOut, BillingStatusOut,
+    DailyDigestIn, DailyDigestOut,
+    GoogleAuthIn, AuthResultOut, UserOut,
 )
 from .pipeline import run_scan
 from .scheduler import start_scheduler, next_run_times
 from .technical_scan import (
     scan_technical_signals, DEFAULT_TIMEFRAME, scan_ema50_breakout, scan_ema50_touch_4h,
-    scan_ema50_double_touch_forex_1h,
+    scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_1h,
 )
 from .candles import get_candles, DEFAULT_CANDLE_TIMEFRAME
 from .quote import get_quote, search_symbols
 from .chart_analysis import analyze_chart_image
 from .chat import generate_chat_reply
-from .ai_summary import generate_news_digest, generate_world_news_hebrew
+from .ai_summary import (
+    generate_news_digest, generate_world_news_hebrew, generate_daily_digest,
+    generate_outlook, generate_company_blurb,
+)
+from .enrichment import enrich_symbol
 from .world_news import get_world_news
+from . import license as license_module
+from . import paddle as paddle_module
+from . import auth as auth_module
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +70,19 @@ _last_ema_touch_4h_scan: Optional[EmaTouch4hScanOut] = None
 _ema_double_touch_forex_scan_lock = threading.Lock()
 _last_ema_double_touch_forex_scan: Optional[EmaDoubleTouchForexScanOut] = None
 
+_pattern_strategy_scan_lock = threading.Lock()
+_last_pattern_strategy_scan: Optional[PatternScanOut] = None
+
+# Each profile costs two OpenAI calls, so reopening the same stock's modal reuses
+# the last one for a while instead of regenerating it.
+_STOCK_PROFILE_TTL_SECONDS = 30 * 60
+_stock_profile_cache: dict[str, tuple[float, StockProfileOut]] = {}
+_stock_profile_cache_lock = threading.Lock()
+
+# One lock per market so a slow stock scan doesn't hold up a quick forex/crypto one.
+_triple_touch_scan_locks = {m: threading.Lock() for m in ("stocks", "forex", "crypto")}
+_last_triple_touch_scan: dict[str, TripleTouchScanOut] = {}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.frontend_origin_list,
@@ -82,11 +106,83 @@ def get_sectors():
 def get_status():
     return {
         "openai_configured": bool(settings.openai_api_key),
+        "ai_enabled": license_module.is_ai_enabled(),
         "next_scans": next_run_times(),
         "scan_times": [settings.scan_time_1, settings.scan_time_2],
         "broken_scan_time": settings.broken_scan_time,
         "timezone": settings.scan_timezone,
     }
+
+
+@app.get("/api/billing/status", response_model=BillingStatusOut)
+def billing_status():
+    return BillingStatusOut(
+        plan=license_module.get_plan(),
+        ai_enabled=license_module.is_ai_enabled(),
+        paddle_client_token=settings.paddle_client_token,
+        paddle_price_id=settings.paddle_price_id,
+        paddle_environment=settings.paddle_environment,
+    )
+
+
+@app.post("/api/billing/dev-set-plan")
+def dev_set_plan(plan: str = Query(..., pattern="^(free|pro)$"), token: str = Query(...)):
+    # Local-only escape hatch to flip the plan without a real Paddle webhook.
+    # Disabled unless PADDLE_DEV_OVERRIDE_TOKEN is set — never enable this in
+    # a production deployment, since anyone with the token gets free AI access.
+    if not settings.paddle_dev_override_token or token != settings.paddle_dev_override_token:
+        raise HTTPException(status_code=403, detail="Dev plan override is not enabled.")
+    lic = license_module.set_plan(plan)
+    return {"plan": lic.plan}
+
+
+@app.post("/api/paddle/webhook")
+async def paddle_webhook(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("paddle-signature", "")
+    if not paddle_module.verify_signature(raw_body, signature):
+        raise HTTPException(status_code=401, detail="Invalid Paddle signature")
+    try:
+        payload = json.loads(raw_body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    paddle_module.handle_event(payload)
+    return {"status": "ok"}
+
+
+def _bearer_token(authorization: Optional[str]) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return ""
+    return authorization[7:].strip()
+
+
+@app.post("/api/auth/google", response_model=AuthResultOut)
+def auth_google(req: GoogleAuthIn):
+    try:
+        user, token = auth_module.login_with_google(req.credential)
+    except auth_module.InvalidGoogleCredential as exc:
+        raise HTTPException(status_code=401, detail=f"אימות Google נכשל: {exc}")
+    return AuthResultOut(token=token, user=UserOut.model_validate(user))
+
+
+@app.post("/api/auth/guest", response_model=AuthResultOut)
+def auth_guest():
+    user, token = auth_module.login_as_guest()
+    return AuthResultOut(token=token, user=UserOut.model_validate(user))
+
+
+@app.get("/api/auth/me", response_model=UserOut)
+def auth_me(authorization: Optional[str] = Header(None)):
+    user = auth_module.get_user_from_token(_bearer_token(authorization))
+    if user is None:
+        raise HTTPException(status_code=401, detail="לא מחובר.")
+    return UserOut.model_validate(user)
+
+
+@app.post("/api/auth/logout")
+def auth_logout(authorization: Optional[str] = Header(None)):
+    auth_module.logout(_bearer_token(authorization))
+    return {"status": "ok"}
 
 
 @app.get("/api/scans", response_model=list[ScanSummaryOut])
@@ -228,6 +324,53 @@ def trigger_ema_double_touch_forex_scan():
         return out
 
 
+@app.get("/api/pattern-strategy-scan/latest", response_model=PatternScanOut)
+def latest_pattern_strategy_scan():
+    if _last_pattern_strategy_scan is None:
+        raise HTTPException(status_code=404, detail="עדיין לא הרצת סריקת האסטרטגיה שלך. לחץ על 'סרוק עכשיו' כדי להתחיל.")
+    return _last_pattern_strategy_scan
+
+
+@app.post("/api/pattern-strategy-scan/run", response_model=PatternScanOut)
+def trigger_pattern_strategy_scan():
+    global _last_pattern_strategy_scan
+    # On-demand only, single-flight: a second click while a scan is already running
+    # waits for it to finish and reuses its result rather than starting a duplicate.
+    with _pattern_strategy_scan_lock:
+        result = scan_pattern_strategy()
+        out = PatternScanOut(
+            scanned_at=result.scanned_at,
+            universe_stock_count=result.universe_stock_count,
+            stocks=result.stocks,
+        )
+        _last_pattern_strategy_scan = out
+        return out
+
+
+@app.get("/api/triple-touch-scan/latest", response_model=TripleTouchScanOut)
+def latest_triple_touch_scan(market: str = Query("stocks", pattern="^(stocks|forex|crypto)$")):
+    cached = _last_triple_touch_scan.get(market)
+    if cached is None:
+        raise HTTPException(status_code=404, detail="עדיין לא הרצת סריקת 3 נגיעות ברמה. לחץ על 'סרוק עכשיו' כדי להתחיל.")
+    return cached
+
+
+@app.post("/api/triple-touch-scan/run", response_model=TripleTouchScanOut)
+def trigger_triple_touch_scan(market: str = Query("stocks", pattern="^(stocks|forex|crypto)$")):
+    # On-demand only, serialized per market: a second click while a scan is already
+    # running waits for it rather than hammering Yahoo with two at once.
+    with _triple_touch_scan_locks[market]:
+        result = scan_triple_touch_1h(market)
+        out = TripleTouchScanOut(
+            market=result.market,
+            scanned_at=result.scanned_at,
+            universe_count=result.universe_count,
+            results=result.results,
+        )
+        _last_triple_touch_scan[market] = out
+        return out
+
+
 @app.get("/api/candles", response_model=CandlesOut)
 def candles(
     symbol: str = Query(..., min_length=1),
@@ -285,6 +428,11 @@ def crypto_scan():
             MarketCandidateOut(
                 symbol=c.symbol, name=c.name, price=c.price, change_percent=c.change_percent,
                 volume=c.volume, market_cap=c.market_cap,
+                fifty_two_week_high=c.fifty_two_week_high, fifty_two_week_low=c.fifty_two_week_low,
+                news=[
+                    NewsItemOut(title=n.title, publisher=n.publisher, link=n.link, published_at=n.published_at)
+                    for n in c.news
+                ],
             )
             for c in result.candidates
         ],
@@ -340,6 +488,56 @@ async def chat(messages: str = Form(...), image: Optional[UploadFile] = File(Non
     return ChatReplyOut(reply=reply, suggestions=suggestions)
 
 
+@app.get("/api/stock-profile", response_model=StockProfileOut)
+def stock_profile(symbol: str = Query(..., min_length=1)):
+    symbol = symbol.upper()
+    now = time.time()
+    with _stock_profile_cache_lock:
+        cached = _stock_profile_cache.get(symbol)
+    if cached and now - cached[0] < _STOCK_PROFILE_TTL_SECONDS:
+        return cached[1]
+
+    q = get_quote(symbol)
+    if q is None:
+        raise HTTPException(status_code=404, detail="לא נמצא ציטוט עבור הסמל הזה.")
+    enrichment = enrich_symbol(symbol)
+    direction = "losers" if (q.change_percent or 0) < 0 else "gainers"
+
+    # The two AI calls are independent round-trips, so run them side by side.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outlook_future = pool.submit(
+            generate_outlook,
+            symbol=symbol, name=q.name, price=q.price, change_percent=q.change_percent,
+            direction=direction, enrichment=enrichment,
+        )
+        blurb_future = pool.submit(
+            generate_company_blurb,
+            symbol=symbol, name=q.name, sector=enrichment.sector, industry=enrichment.industry,
+            business_summary=enrichment.business_summary,
+        )
+        ai_summary = outlook_future.result()
+        company_blurb = blurb_future.result()
+
+    profile = StockProfileOut(
+        symbol=symbol, name=q.name, sector=enrichment.sector, industry=enrichment.industry,
+        price=q.price, change_percent=q.change_percent, market_cap=q.market_cap,
+        avg_volume=enrichment.avg_volume,
+        target_mean_price=enrichment.target_mean_price,
+        target_high_price=enrichment.target_high_price,
+        target_low_price=enrichment.target_low_price,
+        recommendation_key=enrichment.recommendation_key,
+        num_analyst_opinions=enrichment.num_analyst_opinions,
+        ai_summary=ai_summary, company_blurb=company_blurb,
+        news=[
+            NewsItemOut(title=n.title, publisher=n.publisher, link=n.link, published_at=n.published_at)
+            for n in enrichment.news
+        ],
+    )
+    with _stock_profile_cache_lock:
+        _stock_profile_cache[symbol] = (now, profile)
+    return profile
+
+
 @app.post("/api/news-digest", response_model=NewsDigestOut)
 def news_digest(req: NewsDigestIn):
     summary = generate_news_digest(req.symbol, [n.model_dump() for n in req.news])
@@ -360,3 +558,43 @@ def world_news(limit: int = Query(5, ge=1, le=10)):
         )
         for n, tr in zip(items, translated)
     ])
+
+
+@app.post("/api/daily-digest", response_model=DailyDigestOut)
+def daily_digest(req: DailyDigestIn, db: Session = Depends(get_db)):
+    # The demo portfolio lives only in the browser (usePortfolio.js), so it
+    # arrives in the request body; scan highlights are gathered here from the
+    # DB (scheduled scans) and the in-memory caches of the on-demand scans.
+    def _top_movers(direction: str, limit: int = 3) -> list[dict]:
+        scan = (
+            db.query(Scan)
+            .filter(Scan.direction == direction, Scan.category.is_(None))
+            .order_by(desc(Scan.created_at))
+            .first()
+        )
+        if not scan:
+            return []
+        return [
+            {"symbol": r.symbol, "change_percent": r.change_percent}
+            for r in scan.results[:limit]
+            if r.change_percent is not None
+        ]
+
+    broken_scan = (
+        db.query(Scan)
+        .filter(Scan.direction == "broken", Scan.category.is_(None))
+        .order_by(desc(Scan.created_at))
+        .first()
+    )
+
+    scans_summary = {
+        "gainers": _top_movers("gainers"),
+        "losers": _top_movers("losers"),
+        "broken_count": len(broken_scan.results) if broken_scan else 0,
+        "ema_breakout_count": len(_last_ema_breakout_scan.stocks) if _last_ema_breakout_scan else 0,
+        "ema_touch_4h_count": len(_last_ema_touch_4h_scan.stocks) if _last_ema_touch_4h_scan else 0,
+        "pattern_strategy_count": len(_last_pattern_strategy_scan.stocks) if _last_pattern_strategy_scan else 0,
+    }
+
+    summary = generate_daily_digest(req.cash, [h.model_dump() for h in req.holdings], scans_summary)
+    return DailyDigestOut(summary=summary, generated_at=datetime.utcnow())

@@ -1,0 +1,76 @@
+# Render Blueprint: New > Blueprint > pick this repo, and Render creates both
+# services below. After the first deploy, fill in the cross-links:
+#   1. stock-scanner (static site) > Environment > VITE_API_BASE =
+#      the API's URL, e.g. https://stock-scanner-api.onrender.com (no trailing /)
+#      then "Save, rebuild, and deploy" — Vite bakes it in at build time.
+#   2. stock-scanner-api > Environment > FRONTEND_ORIGINS =
+#      the static site's URL, e.g. https://stock-scanner.onrender.com
+#      otherwise the browser blocks every API call (CORS).
+services:
+  - type: web
+    name: stock-scanner-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:///./stockbot.db
+      - key: SCAN_MIN_ABS_PERCENT
+        value: "8.0"
+      - key: SCAN_MIN_VOLUME
+        value: "100000"
+      - key: SCAN_MAX_RESULTS
+        value: "100"
+      - key: SCAN_EXCLUDE_DERIVATIVES
+        value: "true"
+      - key: BROKEN_MAX_PRICE
+        value: "2.0"
+      - key: BROKEN_MIN_DRAWDOWN_PERCENT
+        value: "60.0"
+      - key: BROKEN_MIN_VOLUME
+        value: "20000"
+      - key: SCAN_TIME_1
+        value: "09:45"
+      - key: SCAN_TIME_2
+        value: "16:15"
+      - key: BROKEN_SCAN_TIME
+        value: "08:30"
+      - key: SCAN_TIMEZONE
+        value: America/New_York
+      - key: PADDLE_CLIENT_TOKEN
+        sync: false
+      - key: PADDLE_PRICE_ID
+        sync: false
+      - key: PADDLE_WEBHOOK_SECRET
+        sync: false
+      - key: PADDLE_ENVIRONMENT
+        value: sandbox
+
+  - type: web
+    name: stock-scanner
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false

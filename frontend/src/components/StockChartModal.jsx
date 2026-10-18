@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, LineSeries } from "lightweight-charts";
+import { createChart, createSeriesMarkers, CandlestickSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { getCandles } from "../api";
 
 const TIMEFRAMES = [
@@ -11,6 +11,8 @@ const TIMEFRAMES = [
 
 const EMA_PERIOD = 50;
 const EMA_COLOR = "#2962ff";
+// Candles of context shown before the first marked touch when zooming in on a pattern.
+const PATTERN_LEAD_BARS = 30;
 
 // Same formula as the backend's technical-scan EMA (pandas .ewm(span, adjust=False).mean()).
 function computeEma(candles, period) {
@@ -35,11 +37,15 @@ function readThemeColors() {
   };
 }
 
-export default function StockChartModal({ symbol, name, onClose }) {
+// levelLine ({ price, title, kind: "resistance" | "support" }) and touchTimes (ISO
+// strings of 1h candles) are optional — a scan result passes them so the chart shows
+// the level it found and marks each touch.
+export default function StockChartModal({ symbol, name, onClose, levelLine, touchTimes }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const emaSeriesRef = useRef(null);
+  const markersRef = useRef(null);
   const [timeframe, setTimeframe] = useState("1h");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -72,9 +78,21 @@ export default function StockChartModal({ symbol, name, onClose }) {
       crosshairMarkerVisible: false,
       title: `EMA${EMA_PERIOD}`,
     });
+    const levelColor = (c) => (levelLine?.kind === "support" ? c.up : c.down);
+    const priceLine = levelLine
+      ? series.createPriceLine({
+          price: levelLine.price,
+          color: levelColor(colors),
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: levelLine.title,
+        })
+      : null;
     chartRef.current = chart;
     seriesRef.current = series;
     emaSeriesRef.current = emaSeries;
+    markersRef.current = createSeriesMarkers(series, []);
 
     const observer = new MutationObserver(() => {
       const c = readThemeColors();
@@ -92,6 +110,7 @@ export default function StockChartModal({ symbol, name, onClose }) {
         wickUpColor: c.up,
         wickDownColor: c.down,
       });
+      priceLine?.applyOptions({ color: levelColor(c) });
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
@@ -99,6 +118,7 @@ export default function StockChartModal({ symbol, name, onClose }) {
       observer.disconnect();
       chart.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -110,10 +130,34 @@ export default function StockChartModal({ symbol, name, onClose }) {
           data.candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }))
         );
         emaSeriesRef.current?.setData(computeEma(data.candles, EMA_PERIOD));
-        chartRef.current?.timeScale().fitContent();
+
+        // Touch times are hourly candles, so they only line up with bars on the 1h view.
+        const touchSecs = timeframe === "1h" && touchTimes ? touchTimes.map((iso) => Date.parse(iso) / 1000) : [];
+        const isSupport = levelLine?.kind === "support";
+        const colors = readThemeColors();
+        markersRef.current?.setMarkers(
+          touchSecs.map((time, i) => ({
+            time,
+            position: isSupport ? "belowBar" : "aboveBar",
+            shape: isSupport ? "arrowUp" : "arrowDown",
+            color: isSupport ? colors.up : colors.down,
+            text: String(i + 1),
+          }))
+        );
+        const firstTouchIdx = touchSecs.length ? data.candles.findIndex((c) => c.time === touchSecs[0]) : -1;
+        if (firstTouchIdx >= 0) {
+          chartRef.current?.timeScale().setVisibleLogicalRange({
+            from: firstTouchIdx - PATTERN_LEAD_BARS,
+            to: data.candles.length + 3,
+          });
+        } else {
+          chartRef.current?.timeScale().fitContent();
+        }
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+    // levelLine/touchTimes are fixed for the modal's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, timeframe]);
 
   useEffect(() => {

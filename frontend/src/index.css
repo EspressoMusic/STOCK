@@ -32,7 +32,7 @@
   --card-shadow: rgba(23, 20, 12, 0.14);
   --hard-shadow: var(--ink);
   --radius: 16px;
-  --nav-height: 92px;
+  --nav-height: 64px;
   --chat-bg: #ecd7a0;
   --muted-blue: #4a6c87;
   --muted-blue-bg: #dde7ee;
@@ -212,12 +212,13 @@ html, body {
 }
 
 .status-box {
-  text-align: left;
+  text-align: center;
   font-size: 0.82rem;
   color: var(--text-muted);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
 }
 
 .theme-toggle {
@@ -338,20 +339,33 @@ html, body {
 }
 
 .rescan-btn {
-  margin-right: auto;
-  border: none;
+  border: 2.5px solid var(--border);
   background: var(--accent);
-  color: white;
-  padding: 9px 18px;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  font-weight: 600;
+  color: var(--ink);
+  padding: 13px 18px;
+  border-radius: 999px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-family: inherit;
   cursor: pointer;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.rescan-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+}
+
+.rescan-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--hard-shadow);
 }
 
 .rescan-btn:disabled {
   opacity: 0.6;
   cursor: default;
+  box-shadow: 2px 2px 0 var(--hard-shadow);
 }
 
 .state-msg {
@@ -484,8 +498,10 @@ html, body {
 
 .ai-bubble {
   margin: 0 16px 14px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   text-align: center;
+  background: var(--surface-cream);
+  border-radius: 14px;
 }
 
 .ai-label {
@@ -501,6 +517,26 @@ html, body {
   margin: 0;
   font-size: 0.95rem;
   line-height: 1.5;
+}
+
+.ai-summary-news-link {
+  color: var(--accent-deep);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.ai-summary-news-link:hover,
+.ai-summary-news-link:focus-visible {
+  color: var(--text);
+}
+
+.news-summary-modal {
+  max-width: 380px;
+}
+
+.news-summary-modal .chart-modal-body {
+  min-height: auto;
 }
 
 .card-detail {
@@ -519,14 +555,14 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  gap: 4px;
+  font-size: 1.25rem;
+  font-weight: 700;
   text-align: center;
 }
 
 .detail-label {
-  font-size: 0.75rem;
+  font-size: 0.95rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -539,11 +575,12 @@ html, body {
 
 .analyst-block p, .news-block p {
   margin: 4px 0 0;
-  font-size: 0.92rem;
+  font-size: 1.15rem;
 }
 
 .muted {
   color: var(--text-muted);
+  font-size: 1.15rem;
 }
 
 .news-block ul {
@@ -557,7 +594,7 @@ html, body {
 }
 
 .news-digest-list li {
-  font-size: 0.92rem;
+  font-size: 1.15rem;
   font-weight: 600;
   line-height: 1.4;
 }
@@ -570,40 +607,36 @@ html, body {
 
 .timeframe-toggle {
   display: flex;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
   overflow: hidden;
 }
 
 .timeframe-toggle button {
+  flex: 1;
   border: none;
   background: transparent;
-  padding: 9px 16px;
-  font-size: 0.9rem;
+  padding: 10px 16px;
+  font-size: 0.88rem;
+  font-weight: 700;
   cursor: pointer;
   color: var(--text-muted);
   transition: background 0.15s, color 0.15s;
 }
 
 .timeframe-toggle button + button {
-  border-right: 1px solid var(--border);
+  border-right: 2px solid var(--border);
 }
 
 .timeframe-toggle button.active {
   background: var(--accent);
-  color: white;
-  font-weight: 600;
+  color: var(--ink);
 }
 
 .tech-panel-head {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .tech-groups {
@@ -679,6 +712,16 @@ html, body {
   color: var(--oversold);
 }
 
+.signal-badge.signal-long {
+  background: var(--up-bg);
+  color: var(--up);
+}
+
+.signal-badge.signal-short {
+  background: var(--down-bg);
+  color: var(--down);
+}
+
 .card-actions {
   padding: 0 16px 14px;
 }
@@ -722,6 +765,12 @@ html, body {
   padding: 20px;
   z-index: 1000;
   animation: modalOverlayIn 0.18s ease;
+}
+
+@media (max-width: 420px) {
+  .chart-modal-overlay {
+    padding: 10px;
+  }
 }
 
 @keyframes modalOverlayIn {
@@ -826,16 +875,21 @@ html, body {
   padding: 20px;
 }
 
+/* full-screen chart: centre the message in the chart instead of at the top,
+   where it collided with the floating symbol/price block */
+.chart-scan-screen .chart-state-msg {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  margin: 0;
+  z-index: 1;
+}
+
 @media (max-width: 640px) {
   .app-header {
     flex-direction: column;
-  }
-  .status-box {
-    text-align: right;
-  }
-  .rescan-btn {
-    margin-right: 0;
-    width: 100%;
   }
   .chart-modal {
     max-height: 95vh;
@@ -1169,8 +1223,9 @@ html, body {
 /* ---------- category chips ---------- */
 .chip-row {
   display: flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
-  gap: 8px;
+  gap: 8px 10px;
   overflow-x: auto;
   padding-bottom: 2px;
   scrollbar-width: none;
@@ -1205,11 +1260,22 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 10px;
+  margin-top: 10px;
+}
+
+.last-scan-note {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .scan-row .btn {
-  flex: 0 0 auto;
-  width: 130px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 130px;
   height: 46px;
   box-sizing: border-box;
   padding: 0 14px;
@@ -1222,10 +1288,10 @@ html, body {
 }
 
 .scan-row .btn.scan-now-btn {
-  border-radius: 999px;
-  border-color: var(--ink);
+  border-radius: 14px;
+  border-color: var(--border);
   background: var(--surface-cream);
-  color: var(--ink);
+  color: var(--text-muted);
 }
 
 .scan-row .btn:hover {
@@ -1241,8 +1307,9 @@ html, body {
 /* ---------- filter menu (small top-right toggle + dropdown) ---------- */
 .filter-menu {
   position: relative;
-  flex-shrink: 0;
-  width: 130px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 130px;
   height: 46px;
 }
 
@@ -1250,7 +1317,7 @@ html, body {
   position: absolute;
   top: 0;
   right: 0;
-  width: 130px;
+  width: 100%;
   height: 46px;
   flex-shrink: 0;
   border-radius: 14px;
@@ -1364,57 +1431,200 @@ html, body {
 .top-bar-settings-btn {
   width: 40px;
   height: 40px;
+  padding: 0;
   display: grid;
   place-items: center;
   border: none;
-  background: transparent;
+  background: none;
   color: var(--text);
   cursor: pointer;
-  transition: transform 0.1s, color 0.12s;
+  transition: transform 0.2s, color 0.12s;
 }
 
 .top-bar-settings-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
 }
 
 .top-bar-settings-btn:active {
-  transform: scale(0.92);
+  transform: rotate(45deg) scale(0.92);
 }
 
 .top-bar-settings-btn.active {
   color: var(--accent);
 }
 
+.top-bar {
+  gap: 8px;
+}
+
+/* ---------- watchlist (center tab) ---------- */
+/* no card chrome: the stock cards sit straight on the page, like the scanner */
+.watchlist-box {
+  flex: 0 0 auto;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+
+.watchlist-box-title {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.watchlist-box-empty {
+  margin: auto 0;
+  padding: 0 12px;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+
+.watchlist-scanner-btn {
+  align-self: center;
+  flex-shrink: 0;
+  color: #17140c;
+  padding: 16px 34px;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.watchlist-scanner-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.watchlist-head {
+  margin-bottom: 6px;
+}
+
+.watchlist-item {
+  position: relative;
+}
+
+.watchlist-remove {
+  position: absolute;
+  top: -10px;
+  inset-inline-end: -6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 2.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-cream);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--hard-shadow);
+}
+
+.watchlist-remove:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--hard-shadow);
+}
+
+.watchlist-add-btn {
+  margin-top: 16px;
+  width: 100%;
+  padding: 18px;
+  border: 3px dashed var(--border);
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.watchlist-add-btn:active {
+  background: var(--surface-cream);
+}
+
+.watchlist-empty {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 20px;
+  background: var(--surface-cream);
+  border: 3px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+  text-align: center;
+}
+
+.watchlist-empty p {
+  margin: 0;
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.watchlist-empty-star {
+  font-size: 2.4rem;
+  line-height: 1;
+  color: var(--accent-deep);
+}
+
+.chart-modal-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-star-btn.is-saved,
+.watch-star-btn.is-saved:hover {
+  border-color: var(--border);
+  background: var(--accent);
+  color: #17140c;
+}
+
 /* ---------- bottom nav ---------- */
 .bottom-nav {
   flex-shrink: 0;
+  position: relative;
   z-index: 30;
   display: flex;
-  height: var(--nav-height);
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: #b8703f;
   border-top: 2.5px solid var(--border);
 }
 
 .bottom-nav-btn {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 0 4px 8px;
   border: none;
   background: none;
   color: rgba(255, 240, 219, 0.8);
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
   font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .bottom-nav-btn svg {
-  width: 27px;
-  height: 27px;
+  width: 19px;
+  height: 19px;
   transition: transform 0.15s ease;
 }
 
@@ -1423,12 +1633,13 @@ html, body {
 }
 
 .bottom-nav-btn.active svg {
-  transform: scale(1.3);
+  transform: scale(1.2);
 }
 
 .bottom-nav-icon-wrap {
-  width: 42px;
-  height: 42px;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   border-radius: 999px;
@@ -1442,29 +1653,37 @@ html, body {
   box-shadow: 2px 2px 0 var(--hard-shadow);
 }
 
+/* center tab: a filled circle that rises above the bar's top edge */
 .bottom-nav-btn-center {
   position: relative;
+  color: #fff6e6;
 }
 
 .bottom-nav-icon-wrap-center {
-  width: 74px;
-  height: 74px;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 1px;
   border-radius: 999px;
-  background: none;
-  border: 2px solid rgba(255, 240, 219, 0.35);
-  color: inherit;
+  background: var(--paper);
+  border: 2.5px solid var(--border);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  color: var(--ink);
   transition: transform 0.15s ease, background-color 0.12s, border-color 0.12s, box-shadow 0.12s, color 0.12s;
 }
 
 .bottom-nav-icon-wrap-center svg {
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
+}
+
+.bottom-nav-btn-center:active .bottom-nav-icon-wrap-center {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--hard-shadow);
 }
 
 .bottom-nav-btn-center.active .bottom-nav-icon-wrap-center {
   background: var(--accent);
   border: 3px solid var(--border);
-  box-shadow: 4px 4px 0 var(--hard-shadow);
   color: var(--ink);
 }
 
@@ -1521,6 +1740,21 @@ html, body {
   line-height: 1.15;
 }
 
+.portfolio-hero-pnl {
+  font-size: clamp(1.15rem, 5vw, 1.5rem);
+  font-weight: 800;
+  margin: 0 0 6px;
+  text-align: center;
+}
+
+.portfolio-hero-pnl.is-up {
+  color: var(--up);
+}
+
+.portfolio-hero-pnl.is-down {
+  color: var(--down);
+}
+
 .portfolio-hero-meta {
   margin: 2px 0 0;
   font-size: 0.8rem;
@@ -1532,17 +1766,31 @@ html, body {
 .holdings-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .holding-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  background: var(--surface);
-  border: 2px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 14px;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  background: var(--surface-cream);
+  border: 3px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 18px;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  text-align: inherit;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.holding-row:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--hard-shadow);
 }
 
 .holding-main {
@@ -1551,8 +1799,16 @@ html, body {
 }
 
 .holding-symbol {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 800;
   font-size: 0.95rem;
+}
+
+.holding-short-badge {
+  font-size: 0.62rem;
+  padding: 1px 7px;
 }
 
 .holding-meta {
@@ -1571,6 +1827,21 @@ html, body {
   font-size: 0.9rem;
 }
 
+.holding-pnl {
+  font-weight: 700;
+  font-size: 0.8rem;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.holding-pnl.is-up {
+  color: var(--up);
+}
+
+.holding-pnl.is-down {
+  color: var(--down);
+}
+
 .holding-remove {
   border: none;
   background: none;
@@ -1580,6 +1851,59 @@ html, body {
   font-size: 1rem;
   line-height: 1;
   flex-shrink: 0;
+}
+
+.trade-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 24px;
+}
+
+.trade-history-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.trade-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trade-history-list-expanded {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.stock-row.trade-history-row {
+  /* only symbol + P&L badge here, so no centered middle column */
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+  border-width: 3px;
+  border-radius: 999px;
+  padding: 7px 18px;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.stock-row.trade-history-row:active {
+  box-shadow: 1px 1px 0 var(--hard-shadow);
+}
+
+.trade-history-row.stock-row .stock-row-symbol {
+  font-size: 0.95rem;
+}
+
+.trade-history-row.stock-row .chg-badge {
+  font-size: 0.8rem;
+  padding: 3px 10px;
+  border-width: 2px;
 }
 
 .add-holding-card {
@@ -1681,9 +2005,144 @@ html, body {
   flex-direction: column;
 }
 
-.chart-full-container .chart-container {
+.chart-full-container .chart-container-wrap {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+.chart-full-container .chart-container-wrap .chart-container {
+  width: 100%;
+  height: 100%;
+}
+
+.chart-position-line-btn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 32px;
+  margin-top: -16px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  z-index: 4;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chart-position-line-btn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 3px solid var(--line-color, var(--up));
+  transform: translateY(-1.5px);
+  pointer-events: none;
+}
+
+.chart-position-line-btn:hover,
+.chart-position-line-btn:active {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.chart-position-line-label {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(calc(-100% - 5px));
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--line-color, var(--up));
+  pointer-events: none;
+}
+
+.chart-last-price-line {
+  position: absolute;
+  right: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.chart-last-price-badge {
+  position: absolute;
+  right: 1px;
+  transform: translateY(-50%);
+  font-size: 0.54rem;
+  font-weight: 700;
+  padding: 1px 3px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+  background: #000000;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.chart-position-line-price {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--line-color, var(--up));
+  pointer-events: none;
+}
+
+.chart-sltp-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 28px;
+  margin-top: -14px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 4;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chart-sltp-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px dashed var(--line-color);
+  transform: translateY(-1px);
+  pointer-events: none;
+}
+
+.chart-sltp-line-sl {
+  --line-color: var(--down);
+}
+
+.chart-sltp-line-tp {
+  --line-color: var(--up);
+}
+
+.chart-sltp-line-label {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--line-color);
+  pointer-events: none;
 }
 
 .chart-scan-topbar {
@@ -1695,7 +2154,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0px;
-  padding: 2px 16px 12px;
+  padding: 14px 16px 12px;
   pointer-events: none;
 }
 
@@ -1707,7 +2166,7 @@ html, body {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 78px;
+  bottom: 122px;
   z-index: 5;
   text-align: center;
   pointer-events: none;
@@ -1722,6 +2181,11 @@ html, body {
   align-items: center;
   gap: 8px;
   pointer-events: auto;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 10px;
+  box-shadow: 2px 2px 0 var(--hard-shadow);
 }
 
 .position-pnl {
@@ -1772,31 +2236,71 @@ html, body {
   gap: 12px;
 }
 
-.chart-scan-topbar-row {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+/* the controls float in the top corner so the symbol/price block can sit at
+   the very top, level with them, instead of in a row underneath */
+.chart-scan-topbar .chart-scan-topbar-row {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.chart-scan-topbar-controls {
+  display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: auto;
 }
 
-.chart-scan-topbar-row > * {
-  grid-row: 1;
+.chart-scan-quote {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
 }
 
-.chart-scan-topbar-row .tf-dropdown {
-  grid-column: 3;
-  justify-self: end;
-  transform: translateY(5px);
+.indicators-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--hard-shadow);
 }
 
-.chart-scan-topbar-spacer {
-  grid-column: 1;
-  justify-self: start;
+.indicators-trigger svg {
+  width: 14px;
+  height: 14px;
 }
 
-.chart-scan-topbar-row .chart-scan-symbol-btn {
-  grid-column: 2;
-  justify-self: center;
+.indicators-trigger.open {
+  background: var(--accent);
+  color: white;
+}
+
+.watch-star-btn {
+  font-size: 0.95rem;
+  line-height: 1;
+  font-family: inherit;
+}
+
+.watch-star-btn.is-saved {
+  background: var(--accent);
+  color: #17140c;
+}
+
+.watch-star-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .chart-scan-symbol-btn {
@@ -1805,8 +2309,7 @@ html, body {
   gap: 8px;
   border: none;
   background: none;
-  padding: 6px 8px;
-  margin: 0 -8px;
+  padding: 0 6px;
   border-radius: 8px;
   cursor: pointer;
   font-family: inherit;
@@ -1819,32 +2322,6 @@ html, body {
 
 .tf-dropdown {
   position: relative;
-}
-
-.tf-dropdown-trigger {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  padding: 8px 12px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  font-family: inherit;
-  cursor: pointer;
-  box-shadow: 2px 2px 0 var(--hard-shadow);
-}
-
-.tf-dropdown-trigger svg {
-  width: 12px;
-  height: 12px;
-  transition: transform 0.15s ease;
-}
-
-.tf-dropdown-trigger.open svg {
-  transform: rotate(180deg);
 }
 
 .tf-dropdown-menu {
@@ -1931,7 +2408,7 @@ html, body {
   align-items: baseline;
   gap: 10px;
   border: none;
-  background: none;
+  background: var(--surface-cream);
   padding: 10px 8px;
   border-radius: 8px;
   cursor: pointer;
@@ -1941,7 +2418,7 @@ html, body {
 }
 
 .symbol-picker-result:hover {
-  background: var(--surface-cream-dark);
+  background: var(--surface);
 }
 
 .symbol-picker-result-symbol {
@@ -1957,23 +2434,30 @@ html, body {
   white-space: nowrap;
 }
 
+.chart-scan-symbol-btn .symbol {
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+/* symbol / price / change stacked on one centered axis */
 .chart-scan-price-block {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 3px;
-  margin-top: -6px;
   text-align: center;
 }
 
 .chart-scan-price-block .stock-detail-price {
-  font-size: 2.4rem;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-scan-price-block .chg-badge {
-  font-size: 1.05rem;
-  padding: 4px 14px;
+  font-size: 0.72rem;
+  padding: 1px 8px;
 }
 
 .chart-scan-floating-bar .btn-primary {
@@ -2100,6 +2584,157 @@ html, body {
 
 .chart-modal input:focus-visible {
   outline: none;
+}
+
+.position-menu-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 20px;
+  background: var(--surface-cream-dark);
+}
+
+.position-menu-modal .chart-modal-head {
+  position: relative;
+  justify-content: center;
+  border-bottom: none;
+}
+
+.position-menu-modal .chart-modal-title {
+  width: 100%;
+  justify-content: center;
+}
+
+.position-menu-modal .chart-modal-close {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.position-menu-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 20px;
+  text-align: center;
+}
+
+.position-menu-summary .position-pnl {
+  font-size: 1.7rem;
+}
+
+.position-menu-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px;
+}
+
+/* ---------- Stop-loss / take-profit (holding detail modal) ---------- */
+.sl-tp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+
+.sl-tp-row {
+  display: flex;
+  gap: 12px;
+}
+
+.sl-tp-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.sl-tp-input {
+  width: 100%;
+  height: 44px;
+  font-size: 1rem;
+}
+
+.sl-tp-error {
+  margin: 0;
+  color: var(--down);
+  font-size: 0.75rem;
+}
+
+/* ---------- Auto-close banner (stop-loss/take-profit triggered) ---------- */
+.auto-close-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--down-bg);
+  color: var(--down);
+  border: 2px solid var(--down);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.auto-close-banner-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auto-close-banner-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ---------- Portfolio link title (opens the portfolio modal) ---------- */
+.portfolio-link-title {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 2px 2px 4px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+}
+
+/* ---------- Portfolio modal (AI digest + stats + progress chart) ---------- */
+.portfolio-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.daily-digest-timestamp {
+  text-align: center;
+  font-size: 0.72rem;
+  margin: -4px 0 0;
+}
+
+.portfolio-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portfolio-progress-chart {
+  width: 100%;
+  height: 140px;
 }
 
 /* ---------- Chat screen (WhatsApp-style layout, system colors) ---------- */
@@ -2439,7 +3074,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--surface);
+  background: var(--muted-blue-bg);
   border: 2.5px solid var(--border);
   border-radius: 14px;
   padding: 14px 16px;
@@ -2535,6 +3170,59 @@ html, body {
   min-height: 40px;
 }
 
+/* ---------- Welcome gate (first-run sign in / guest choice) ---------- */
+.welcome-screen {
+  flex: 1;
+  justify-content: center;
+  align-items: stretch;
+  gap: 28px;
+  padding: 24px 24px 32px;
+}
+
+.welcome-hero {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.welcome-hero .screen-title {
+  font-size: 1.3rem;
+}
+
+.welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.welcome-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.welcome-divider::before,
+.welcome-divider::after {
+  content: "";
+  flex: 1;
+  height: 1.5px;
+  background: var(--border);
+}
+
+.welcome-error {
+  color: var(--down);
+  text-align: center;
+}
+
+.welcome-fineprint {
+  text-align: center;
+  opacity: 0.75;
+}
+
 /* ---------- Legal modal (privacy policy / terms of use) ---------- */
 .legal-modal {
   max-width: 560px;
@@ -2599,19 +3287,23 @@ html, body {
 }
 
 .stock-row {
-  display: flex;
+  /* sizes below use cqi (the card's own width), not vw: on desktop the app
+     sits in a phone-width shell, so vw tracks the browser window instead */
+  container-type: inline-size;
+  display: grid;
+  /* equal side columns keep every badge centered, so they line up row to row */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: clamp(4px, 2.5cqi, 10px);
   width: 100%;
   background: var(--surface-cream);
-  border: 5px solid var(--border);
-  border-radius: 18px;
-  padding: 26px 26px;
+  border: 3px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
   cursor: pointer;
   font-family: inherit;
   color: inherit;
-  box-shadow: 5px 5px 0 var(--hard-shadow);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
@@ -2621,25 +3313,39 @@ html, body {
 }
 
 .stock-row-price {
-  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  /* LTR so a too-long price keeps its start ("$0.20") instead of
+     losing it to the RTL page direction ("2066") */
+  direction: ltr;
   text-align: left;
   font-weight: 700;
-  font-size: 1.3rem;
+  /* sized so a 7-char sub-dollar price ("$0.0321") fits beside a
+     "-100.0%" badge on a ~240px-wide card */
+  font-size: clamp(0.72rem, 6.5cqi, 1.2rem);
   font-variant-numeric: tabular-nums;
 }
 
 .stock-row .chg-badge {
-  flex-shrink: 0;
-  font-size: 1.25rem;
-  padding: 6px 16px;
-  border-width: 2.5px;
+  /* wide enough for "-100.0%", so every badge is the same width */
+  min-width: 5.9em;
+  text-align: center;
+  white-space: nowrap;
+  font-size: clamp(0.66rem, 5.5cqi, 0.95rem);
+  padding: 0.2em 0.45em;
+  border-width: 2px;
 }
 
 .stock-row-symbol {
-  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: right;
   font-weight: 800;
-  font-size: 1.4rem;
+  font-size: clamp(0.8rem, 7cqi, 1.3rem);
   letter-spacing: 0.01em;
 }
 
@@ -2651,30 +3357,47 @@ html, body {
 
 @keyframes stockRowGoldPulse {
   0%, 100% {
-    box-shadow: 5px 5px 0 var(--hard-shadow), 0 0 6px 2px rgba(255, 197, 51, 0.45);
+    box-shadow: 4px 4px 0 var(--hard-shadow), 0 0 6px 2px rgba(255, 197, 51, 0.45);
   }
   50% {
-    box-shadow: 5px 5px 0 var(--hard-shadow), 0 0 18px 6px rgba(255, 197, 51, 0.85);
+    box-shadow: 4px 4px 0 var(--hard-shadow), 0 0 18px 6px rgba(255, 197, 51, 0.85);
   }
 }
 
 :root[data-motion="reduced"] .stock-row-hot {
   animation: none;
-  box-shadow: 5px 5px 0 var(--hard-shadow), 0 0 10px 3px rgba(255, 197, 51, 0.7);
+  box-shadow: 4px 4px 0 var(--hard-shadow), 0 0 10px 3px rgba(255, 197, 51, 0.7);
 }
 
 /* ---------- Stock detail modal ---------- */
 .stock-detail-modal {
   max-width: 480px;
-  background: var(--surface-cream);
+  background: var(--surface-cream-dark);
 }
 
+/* [optional button] | title | close as a grid, so a long symbol can never
+   slide under a button the way the old absolutely-centered title did on
+   narrow phones. Columns are explicit because the stock modal has no button. */
 .stock-detail-modal .chart-modal-head {
   border-bottom: none;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.stock-detail-modal .chart-modal-head > .stock-detail-chart-icon-btn {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.stock-detail-modal .chart-modal-close {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .stock-detail-modal .chart-modal-title {
-  flex: 1;
+  grid-column: 2;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -2682,12 +3405,28 @@ html, body {
   gap: 2px;
 }
 
-.stock-detail-modal .chart-modal-title .symbol {
-  font-size: 1.35rem;
+.stock-detail-modal .chart-modal-title .symbol,
+.stock-detail-modal .chart-modal-title .name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.stock-detail-modal .chart-modal-title .name {
-  font-size: 1rem;
+.stock-detail-modal .chart-modal-title .symbol {
+  font-size: 1.15rem;
+}
+
+/* the company name gets its own full-width row under the head, so it isn't
+   squeezed into the narrow middle column between the buttons and cut off */
+.stock-detail-modal .stock-detail-name {
+  grid-column: 1 / -1;
+  justify-self: center;
+  max-width: 100%;
+  margin-top: -4px;
+  font-size: 0.85rem;
+  text-align: center;
+  white-space: normal;
 }
 
 .stock-detail-company-blurb {
@@ -2699,22 +3438,64 @@ html, body {
   max-width: 340px;
 }
 
+/* the body already has side padding; the base .ai-bubble side margin
+   squeezed these into a narrow column on phones */
+.stock-detail-modal .ai-bubble {
+  margin: 0;
+  padding: 10px 12px;
+}
+
 .stock-detail-modal .ai-bubble p {
-  font-size: 1.05rem;
-  line-height: 1.55;
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 .stock-detail-modal .ai-label {
   font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .stock-detail-body {
-  padding: 16px;
+  padding: 4px 12px 14px;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   display: flex;
   flex-direction: column;
   text-align: center;
-  gap: 14px;
+  gap: 10px;
+}
+
+.stock-detail-body::-webkit-scrollbar {
+  display: none;
+}
+
+/* advanced section: the shared detail/news classes are sized for full
+   cards, so scale them down inside this modal only */
+.stock-detail-modal .detail-grid {
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.stock-detail-modal .detail-item {
+  font-size: 0.95rem;
+  gap: 2px;
+}
+
+.stock-detail-modal .detail-label {
+  font-size: 0.72rem;
+}
+
+.stock-detail-modal .analyst-block,
+.stock-detail-modal .news-block {
+  margin-bottom: 0;
+}
+
+.stock-detail-modal .analyst-block p,
+.stock-detail-modal .news-block p,
+.stock-detail-modal .muted,
+.stock-detail-modal .news-digest-list li {
+  font-size: 0.9rem;
 }
 
 .stock-detail-top {
@@ -2722,7 +3503,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .stock-detail-price {
@@ -2730,14 +3511,19 @@ html, body {
   font-weight: 800;
 }
 
+.stock-detail-modal .stock-detail-price {
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
 .hot-reason-badge {
   align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  padding: 6px 14px;
+  padding: 4px 12px;
   border-radius: 999px;
   border: 2px solid #a8790f;
   background: rgba(255, 197, 51, 0.18);
@@ -2745,8 +3531,8 @@ html, body {
 }
 
 .stock-detail-top .chg-badge {
-  font-size: 1.3rem;
-  padding: 6px 16px;
+  font-size: 0.95rem;
+  padding: 3px 12px;
 }
 
 .stock-detail-chart-icon-btn {
@@ -2755,12 +3541,19 @@ html, body {
   background: var(--muted-blue-bg);
   color: var(--muted-blue);
   cursor: pointer;
-  padding: 8px;
-  border-radius: 10px;
+  padding: 5px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   box-shadow: 2px 2px 0 var(--hard-shadow);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.stock-detail-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 2px;
 }
 
 .stock-detail-chart-icon-btn:hover {
@@ -2770,8 +3563,8 @@ html, body {
 }
 
 .stock-detail-chart-icon-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 15px;
+  height: 15px;
 }
 
 .stock-detail-advanced-toggle {
@@ -2780,9 +3573,9 @@ html, body {
   background: var(--muted-blue-bg);
   box-shadow: 2px 2px 0 var(--hard-shadow);
   border-radius: 999px;
-  padding: 10px 22px;
+  padding: 7px 18px;
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--muted-blue);
   text-decoration: none;
@@ -2792,7 +3585,7 @@ html, body {
 .stock-detail-advanced {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   animation: modalOverlayIn 0.15s ease;
 }
 
@@ -2833,4 +3626,345 @@ html, body {
     border-radius: 0;
     box-shadow: none;
   }
+}
+
+/* =========================================================================
+   MetaTrader 5 skin — swaps the whole app to an MT5-style dark trading-
+   terminal look: navy/charcoal panels, blue accent, sharp corners, no
+   offset "hard shadows", thin grid-line borders. Toggled from Settings.
+   Declared last so it overrides the light/dark palette either way.
+   ========================================================================= */
+
+:root[data-skin="mt5"] {
+  --ground: #12151c;
+  --ground-deep: #0b0d12;
+  --paper: #1b1f29;
+  --ink: #e4e7ec;
+  --ink-soft: #9aa1ad;
+  --ink-faint: #6b7280;
+  --accent-deep: #4da3ff;
+
+  --bg: var(--ground);
+  --surface: var(--paper);
+  --surface-cream: #1f2430;
+  --surface-cream-dark: #262c3a;
+  --border: #333a48;
+  --text: var(--ink);
+  --text-muted: var(--ink-soft);
+  --accent: #1970d6;
+  --down: #f23645;
+  --down-bg: #3a171c;
+  --up: #26a65b;
+  --up-bg: #143824;
+  --broken: #d68a1f;
+  --broken-bg: #3a2c12;
+  --overbought: #e0733a;
+  --overbought-bg: #33220f;
+  --oversold: #2ea3c9;
+  --oversold-bg: #10262e;
+  --warn: #d68a1f;
+  --card-shadow: rgba(0, 0, 0, 0.55);
+  --hard-shadow: transparent;
+  --radius: 4px;
+  --chat-bg: #12151c;
+  --muted-blue: #4da3ff;
+  --muted-blue-bg: #16283d;
+  color-scheme: dark;
+}
+
+:root[data-skin="mt5"] body {
+  font-family: "Segoe UI", Tahoma, "Heebo", Arial, sans-serif;
+}
+
+/* flatten every pill / heavily-rounded shape to sharp terminal corners */
+[data-skin="mt5"] .btn,
+[data-skin="mt5"] .rescan-btn,
+[data-skin="mt5"] .scan-row .btn,
+[data-skin="mt5"] .filter-menu .filter-toggle-btn,
+[data-skin="mt5"] .chip,
+[data-skin="mt5"] .badge-pill,
+[data-skin="mt5"] .tag,
+[data-skin="mt5"] .chg-badge,
+[data-skin="mt5"] .signal-badge,
+[data-skin="mt5"] .card,
+[data-skin="mt5"] .art-card,
+[data-skin="mt5"] .stock-row,
+[data-skin="mt5"] .holding-row,
+[data-skin="mt5"] .settings-row,
+[data-skin="mt5"] .settings-chat-box,
+[data-skin="mt5"] .settings-chat-box-preview,
+[data-skin="mt5"] .chat-stock-card,
+[data-skin="mt5"] .world-news-item,
+[data-skin="mt5"] .tech-row,
+[data-skin="mt5"] .chart-modal,
+[data-skin="mt5"] .chart-btn,
+[data-skin="mt5"] .qty-box,
+[data-skin="mt5"] .qty-preset-btn,
+[data-skin="mt5"] .qty-picker-custom-input,
+[data-skin="mt5"] .filter-dropdown,
+[data-skin="mt5"] .filter-dropdown-item,
+[data-skin="mt5"] .tf-dropdown-menu,
+[data-skin="mt5"] .top-bar-settings-btn,
+[data-skin="mt5"] .position-close-btn,
+[data-skin="mt5"] .chart-scan-position,
+[data-skin="mt5"] .indicators-trigger,
+[data-skin="mt5"] .stock-detail-chart-icon-btn,
+[data-skin="mt5"] .stock-detail-advanced-toggle,
+[data-skin="mt5"] .hot-reason-badge,
+[data-skin="mt5"] .chart-position-line-label,
+[data-skin="mt5"] .chart-last-price-badge,
+[data-skin="mt5"] .chart-position-line-price,
+[data-skin="mt5"] .chart-sltp-line-label,
+[data-skin="mt5"] .direction-toggle,
+[data-skin="mt5"] .timeframe-toggle,
+[data-skin="mt5"] .mode-tabs button,
+[data-skin="mt5"] .chat-input-row input[type="text"],
+[data-skin="mt5"] .chat-attach-preview,
+[data-skin="mt5"] .add-holding-row input {
+  border-radius: 4px !important;
+  box-shadow: none !important;
+}
+
+[data-skin="mt5"] .art-card.tilt-l,
+[data-skin="mt5"] .art-card.tilt-r {
+  transform: none;
+}
+
+/* thin the neo-brutalist thick borders down to MT5-style 1px grid lines */
+[data-skin="mt5"] .stock-row,
+[data-skin="mt5"] .holding-row,
+[data-skin="mt5"] .settings-row,
+[data-skin="mt5"] .settings-chat-box,
+[data-skin="mt5"] .tech-row,
+[data-skin="mt5"] .card,
+[data-skin="mt5"] .art-card,
+[data-skin="mt5"] .btn,
+[data-skin="mt5"] .chip,
+[data-skin="mt5"] .chat-stock-card,
+[data-skin="mt5"] .qty-preset-btn,
+[data-skin="mt5"] .qty-picker-custom-input,
+[data-skin="mt5"] .filter-dropdown,
+[data-skin="mt5"] .stock-detail-modal,
+[data-skin="mt5"] .symbol-picker-modal,
+[data-skin="mt5"] .trade-history-row.stock-row,
+[data-skin="mt5"] .chg-badge,
+[data-skin="mt5"] .signal-badge,
+[data-skin="mt5"] .badge-pill {
+  border-width: 1px !important;
+}
+
+[data-skin="mt5"] .card-open {
+  box-shadow: none !important;
+  border-color: var(--accent);
+}
+
+[data-skin="mt5"] .chart-modal-overlay {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+/* bottom nav: MT5 mobile uses a flat dark bar with a blue active state */
+[data-skin="mt5"] .bottom-nav {
+  background: #161a22;
+  border-top: 1px solid var(--border);
+}
+
+[data-skin="mt5"] .bottom-nav-btn {
+  color: #7d8494;
+}
+
+[data-skin="mt5"] .bottom-nav-btn.active {
+  color: #4da3ff;
+}
+
+[data-skin="mt5"] .bottom-nav-icon-wrap,
+[data-skin="mt5"] .bottom-nav-icon-wrap-center {
+  border-color: rgba(125, 132, 148, 0.35);
+}
+
+[data-skin="mt5"] .bottom-nav-btn.active .bottom-nav-icon-wrap {
+  background: rgba(25, 112, 214, 0.18);
+  border-color: #1970d6;
+  box-shadow: none;
+}
+
+[data-skin="mt5"] .bottom-nav-icon-wrap-center {
+  background: #232a36;
+  border: 1px solid rgba(125, 132, 148, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  color: #c9d1e0;
+}
+
+[data-skin="mt5"] .bottom-nav-btn-center {
+  color: #7d8494;
+}
+
+[data-skin="mt5"] .bottom-nav-btn-center.active {
+  color: #4da3ff;
+}
+
+[data-skin="mt5"] .bottom-nav-btn-center:active .bottom-nav-icon-wrap-center {
+  transform: none;
+}
+
+[data-skin="mt5"] .bottom-nav-btn-center.active .bottom-nav-icon-wrap-center {
+  background: #1970d6;
+  border: 1px solid #1970d6;
+  box-shadow: 0 2px 10px rgba(25, 112, 214, 0.45);
+  color: #fff;
+}
+
+/* qty stepper used a hardcoded slate-blue fill; align it with the accent */
+[data-skin="mt5"] .qty-box {
+  background: var(--accent);
+}
+
+[data-skin="mt5"] .qty-preset-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* =========================================================================
+   MT5 skin — Trade-tab structural clone. The real MetaTrader 5 mobile app's
+   Trade tab is a flush, borderless list (no cards/pills): a Positions/
+   History segmented control up top, each row is two lines (symbol + P/L,
+   then volume/side + open->current price) separated by 1px grid lines, and
+   a sticky Balance/Equity strip pinned above the bottom nav. It's always
+   LTR — symbol left, numbers right — regardless of the app's RTL locale,
+   matching the real app's own layout.
+   ========================================================================= */
+[data-skin="mt5"] .screen.mt5-trade-screen {
+  padding: 0;
+  gap: 0;
+  direction: ltr;
+}
+
+[data-skin="mt5"] .mt5-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  display: flex;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+[data-skin="mt5"] .mt5-tab {
+  flex: 1;
+  padding: 12px 8px 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+[data-skin="mt5"] .mt5-tab.active {
+  color: var(--accent-deep);
+  border-bottom-color: var(--accent-deep);
+}
+
+[data-skin="mt5"] .mt5-list {
+  display: flex;
+  flex-direction: column;
+}
+
+[data-skin="mt5"] .mt5-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+[data-skin="mt5"] .mt5-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+[data-skin="mt5"] .mt5-row:active {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-skin="mt5"] .mt5-row-line1,
+[data-skin="mt5"] .mt5-row-line2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+[data-skin="mt5"] .mt5-row-symbol {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+[data-skin="mt5"] .mt5-row-pnl {
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-skin="mt5"] .mt5-row-pnl.is-up,
+[data-skin="mt5"] .mt5-row-side.is-up {
+  color: var(--up);
+}
+
+[data-skin="mt5"] .mt5-row-pnl.is-down,
+[data-skin="mt5"] .mt5-row-side.is-down {
+  color: var(--down);
+}
+
+[data-skin="mt5"] .mt5-row-side,
+[data-skin="mt5"] .mt5-row-prices {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-skin="mt5"] .mt5-summary-bar {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #161a22;
+  border-top: 1px solid var(--border);
+}
+
+[data-skin="mt5"] .mt5-summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+[data-skin="mt5"] .mt5-summary-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+[data-skin="mt5"] .mt5-summary-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-skin="mt5"] .mt5-summary-value.is-up {
+  color: var(--up);
+}
+
+[data-skin="mt5"] .mt5-summary-value.is-down {
+  color: var(--down);
 }

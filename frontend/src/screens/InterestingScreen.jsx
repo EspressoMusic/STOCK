@@ -5,8 +5,19 @@ import TechnicalPanel from "../components/TechnicalPanel";
 import EmaBreakoutPanel from "../components/EmaBreakoutPanel";
 import EmaTouch4hPanel from "../components/EmaTouch4hPanel";
 import EmaDoubleTouchForexPanel from "../components/EmaDoubleTouchForexPanel";
+import PatternStrategyPanel from "../components/PatternStrategyPanel";
+import TripleTouchPanel from "../components/TripleTouchPanel";
 import { getLatestScan, runScan, getCryptoScan, getCapScan } from "../api";
 import { useLang } from "../context/LangContext";
+import useTechScanSettings from "../hooks/useTechScanSettings";
+import { formatDateTime } from "../format";
+
+// The backend stores scan times as naive UTC datetimes, so they serialize
+// without a zone suffix and would otherwise be parsed as local time.
+function asUtc(iso) {
+  if (!iso || /(Z|[+-]\d{2}:?\d{2})$/.test(iso)) return iso;
+  return `${iso}Z`;
+}
 
 const MARKETS = [
   { id: "stocks", key: "interesting.marketStocks" },
@@ -18,18 +29,33 @@ const STOCK_CATEGORIES = [
   { id: "losers", key: "interesting.losers" },
   { id: "gainers", key: "interesting.gainers" },
   { id: "broken", key: "interesting.broken" },
-  { id: "large", key: "interesting.large" },
-  { id: "small", key: "interesting.small" },
-  { id: "technical", key: "interesting.technical" },
+  { id: "triple-touch", key: "interesting.tripleTouch" },
 ];
+
+const FOREX_CATEGORIES = [
+  { id: "ema-double-touch", key: "interesting.emaDoubleTouch" },
+  { id: "triple-touch", key: "interesting.tripleTouch" },
+];
+
+const CRYPTO_CATEGORIES = [
+  { id: "movers", key: "interesting.cryptoMovers" },
+  { id: "triple-touch", key: "interesting.tripleTouch" },
+];
+
+const CATEGORIES_BY_MARKET = {
+  stocks: STOCK_CATEGORIES,
+  forex: FOREX_CATEGORIES,
+  crypto: CRYPTO_CATEGORIES,
+};
 
 const TECH_SUBTABS = [
   { id: "technical", key: "tech.subtabRsiEma" },
   { id: "ema-breakout", key: "tech.subtabBreakout" },
   { id: "ema-touch-4h", key: "tech.subtabTouch4h" },
+  { id: "pattern-strategy", key: "tech.subtabPatternStrategy" },
 ];
 
-const MoversList = forwardRef(function MoversList({ direction, onSelect, onBusyChange }, ref) {
+const MoversList = forwardRef(function MoversList({ direction, onSelect, onBusyChange, onScannedAt }, ref) {
   const { t } = useLang();
   const [scan, setScan] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +87,10 @@ const MoversList = forwardRef(function MoversList({ direction, onSelect, onBusyC
     onBusyChange?.(scanning);
   }, [scanning, onBusyChange]);
 
+  useEffect(() => {
+    onScannedAt?.(scan?.created_at ?? null);
+  }, [scan, onScannedAt]);
+
   return (
     <div className="compact-list">
       {loading && <p className="state-msg">{t("common.loading")}</p>}
@@ -74,7 +104,7 @@ const MoversList = forwardRef(function MoversList({ direction, onSelect, onBusyC
   );
 });
 
-const MarketList = forwardRef(function MarketList({ fetchFn, onSelect, onBusyChange }, ref) {
+const MarketList = forwardRef(function MarketList({ fetchFn, onSelect, onBusyChange, onScannedAt }, ref) {
   const { t } = useLang();
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -84,7 +114,10 @@ const MarketList = forwardRef(function MarketList({ fetchFn, onSelect, onBusyCha
     setLoading(true);
     setError(null);
     fetchFn()
-      .then((data) => setResults(data.results || []))
+      .then((data) => {
+        setResults(data.results || []);
+        onScannedAt?.(data.scanned_at ?? null);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -118,7 +151,17 @@ const MarketList = forwardRef(function MarketList({ fetchFn, onSelect, onBusyCha
 
 function TechnicalCategory() {
   const { t } = useLang();
-  const [subTab, setSubTab] = useState("technical");
+  const { extraScansEnabled } = useTechScanSettings();
+  const [subTab, setSubTab] = useState("pattern-strategy");
+
+  if (!extraScansEnabled) {
+    return (
+      <div className="compact-list">
+        <PatternStrategyPanel />
+      </div>
+    );
+  }
+
   return (
     <div className="compact-list">
       <div className="chip-row">
@@ -135,18 +178,20 @@ function TechnicalCategory() {
       {subTab === "technical" && <TechnicalPanel />}
       {subTab === "ema-breakout" && <EmaBreakoutPanel />}
       {subTab === "ema-touch-4h" && <EmaTouch4hPanel />}
+      {subTab === "pattern-strategy" && <PatternStrategyPanel />}
     </div>
   );
 }
 
 export default function InterestingScreen() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [market, setMarket] = useState("stocks");
   const [category, setCategory] = useState("losers");
   const [selected, setSelected] = useState(null);
   const [marketOpen, setMarketOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
+  const [lastScanAt, setLastScanAt] = useState(null);
   const marketRef = useRef(null);
   const filterRef = useRef(null);
   const activeListRef = useRef(null);
@@ -166,9 +211,14 @@ export default function InterestingScreen() {
 
   useEffect(() => {
     setScanBusy(false);
+    setLastScanAt(null);
   }, [market, category]);
 
-  const showTopScanButton = market === "stocks" ? category !== "technical" : market === "crypto";
+  // Technical panels carry their own scan button.
+  const showTopScanButton =
+    category === "triple-touch" ||
+    (market === "stocks" ? category !== "technical" : market === "crypto" && category === "movers");
+  const categories = CATEGORIES_BY_MARKET[market];
 
   return (
     <div className="screen">
@@ -194,7 +244,7 @@ export default function InterestingScreen() {
                   className={`filter-dropdown-item ${market === m.id ? "active" : ""}`}
                   onClick={() => {
                     setMarket(m.id);
-                    setCategory("losers");
+                    setCategory(CATEGORIES_BY_MARKET[m.id][0].id);
                     setMarketOpen(false);
                   }}
                 >
@@ -211,7 +261,7 @@ export default function InterestingScreen() {
           </button>
         )}
 
-        {market === "stocks" && (
+        {categories.length > 1 && (
           <div className="filter-menu" ref={filterRef}>
             <button
               className={`filter-toggle-btn ${filterOpen ? "active" : ""}`}
@@ -224,7 +274,7 @@ export default function InterestingScreen() {
             </button>
             {filterOpen && (
               <div className="filter-dropdown filter-dropdown-start">
-                {STOCK_CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <button
                     key={c.id}
                     className={`filter-dropdown-item ${category === c.id ? "active" : ""}`}
@@ -242,14 +292,41 @@ export default function InterestingScreen() {
         )}
       </div>
 
+      {showTopScanButton && lastScanAt && (
+        <p className="last-scan-note">
+          {t("interesting.lastScan")}: {formatDateTime(asUtc(lastScanAt), lang)}
+        </p>
+      )}
+
       {market === "stocks" && category === "losers" && (
-        <MoversList key="losers" ref={activeListRef} direction="losers" onSelect={handleSelect} onBusyChange={setScanBusy} />
+        <MoversList
+          key="losers"
+          ref={activeListRef}
+          direction="losers"
+          onSelect={handleSelect}
+          onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
+        />
       )}
       {market === "stocks" && category === "gainers" && (
-        <MoversList key="gainers" ref={activeListRef} direction="gainers" onSelect={handleSelect} onBusyChange={setScanBusy} />
+        <MoversList
+          key="gainers"
+          ref={activeListRef}
+          direction="gainers"
+          onSelect={handleSelect}
+          onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
+        />
       )}
       {market === "stocks" && category === "broken" && (
-        <MoversList key="broken" ref={activeListRef} direction="broken" onSelect={handleSelect} onBusyChange={setScanBusy} />
+        <MoversList
+          key="broken"
+          ref={activeListRef}
+          direction="broken"
+          onSelect={handleSelect}
+          onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
+        />
       )}
       {market === "stocks" && category === "large" && (
         <MarketList
@@ -258,6 +335,7 @@ export default function InterestingScreen() {
           fetchFn={() => getCapScan("large")}
           onSelect={handleSelect}
           onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
         />
       )}
       {market === "stocks" && category === "small" && (
@@ -267,15 +345,33 @@ export default function InterestingScreen() {
           fetchFn={() => getCapScan("small")}
           onSelect={handleSelect}
           onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
         />
       )}
       {market === "stocks" && category === "technical" && <TechnicalCategory />}
 
-      {market === "crypto" && (
-        <MarketList key="crypto" ref={activeListRef} fetchFn={getCryptoScan} onSelect={handleSelect} onBusyChange={setScanBusy} />
+      {market === "crypto" && category === "movers" && (
+        <MarketList
+          key="crypto"
+          ref={activeListRef}
+          fetchFn={getCryptoScan}
+          onSelect={handleSelect}
+          onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
+        />
       )}
 
-      {market === "forex" && <EmaDoubleTouchForexPanel />}
+      {market === "forex" && category === "ema-double-touch" && <EmaDoubleTouchForexPanel />}
+
+      {category === "triple-touch" && (
+        <TripleTouchPanel
+          key={market}
+          ref={activeListRef}
+          market={market}
+          onBusyChange={setScanBusy}
+          onScannedAt={setLastScanAt}
+        />
+      )}
 
       {selected && (
         <StockDetailModal stock={selected.stock} direction={selected.direction} onClose={() => setSelected(null)} />

@@ -4,6 +4,11 @@ export function formatPrice(value) {
   return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+export function formatPnl(value) {
+  if (value === null || value === undefined) return "—";
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
 export function formatRate(value) {
   if (value === null || value === undefined) return "—";
   return value.toFixed(5);

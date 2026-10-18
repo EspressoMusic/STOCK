@@ -13,32 +13,22 @@ import useAccessibility from "./hooks/useAccessibility";
 import useAuth from "./hooks/useAuth";
 import { CENTER_TAB } from "./features";
 
-function getInitialTheme() {
-  const stored = localStorage.getItem("theme");
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function getInitialSkin() {
-  return localStorage.getItem("skin") === "mt5" ? "mt5" : "default";
-}
-
 function AppShell({ auth }) {
   const { tab, goTo } = useNav();
   const { t } = useLang();
-  const [theme, setTheme] = useState(getInitialTheme);
-  const [skin, setSkin] = useState(getInitialSkin);
+  // Always open in light mode with the default skin (MT5 is always dark);
+  // both toggles only apply to the current visit.
+  const [theme, setTheme] = useState("light");
+  const [skin, setSkin] = useState("default");
   const reminders = useReminders(t);
   const a11y = useAccessibility();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
   }, [theme]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-skin", skin);
-    localStorage.setItem("skin", skin);
   }, [skin]);
 
   return (

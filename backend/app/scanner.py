@@ -8,16 +8,115 @@ Yahoo's own server-side sort is unreliable/stale, so we widen the server-side fi
 and always re-sort client-side on a live field before trimming to the final list."""
 import re
 import logging
+import math
+import time
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
 import yfinance as yf
+import requests
 from yfinance import EquityQuery
 
 from .enrichment import NewsItem, parse_news_item
 
 logger = logging.getLogger(__name__)
+
+
+class MarketDataUnavailable(RuntimeError):
+    """The provider failed; this is not a successful scan with no matches."""
+
+
+_nasdaq_lock = threading.Lock()
+_nasdaq_cache = (0.0, [])
+
+
+def _number(value):
+    try:
+        number = float(str(value).replace(",", "").replace("$", "").replace("%", ""))
+        return number if math.isfinite(number) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _nasdaq_quotes():
+    """Public exchange-wide download; never substitute a limited top-movers list."""
+    global _nasdaq_cache
+    with _nasdaq_lock:
+        if time.monotonic() - _nasdaq_cache[0] < 120:
+            return _nasdaq_cache[1]
+        response = requests.get(
+            "https://api.nasdaq.com/api/screener/stocks",
+            params={"download": "true", "exchange": "nasdaq"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=(5, 20),
+        )
+        response.raise_for_status()
+        rows = (response.json().get("data") or {}).get("rows")
+        if not isinstance(rows, list) or not rows:
+            raise MarketDataUnavailable("Nasdaq returned an invalid or empty universe")
+        quotes = [{
+            "symbol": row.get("symbol"), "shortName": row.get("name"),
+            "regularMarketPrice": _number(row.get("lastsale")),
+            "regularMarketChangePercent": _number(row.get("pctchange")),
+            "regularMarketVolume": _number(row.get("volume")),
+            "marketCap": _number(row.get("marketCap")),
+        } for row in rows]
+        if not any(q["regularMarketPrice"] is not None for q in quotes):
+            raise MarketDataUnavailable("Nasdaq returned no usable prices")
+        _nasdaq_cache = (time.monotonic(), quotes)
+        return quotes
+
+
+def _nasdaq_fallback(query, sort_field, sort_asc, fetch_cap):
+    fields = {
+        "intradayprice": "regularMarketPrice", "percentchange": "regularMarketChangePercent",
+        "dayvolume": "regularMarketVolume", "intradaymarketcap": "marketCap",
+        "ticker": "symbol",
+    }
+
+    def predicate(node):
+        op, args = node["operator"].lower(), node["operands"]
+        if op == "or" and all(child.get("operator") == "EQ" and child.get("operands", [None])[0] == "exchange" for child in args):
+            if {child["operands"][1] for child in args} == set(NASDAQ_EXCHANGES):
+                return lambda q: True
+        if op in ("and", "or"):
+            children = [predicate(child) for child in args]
+            return lambda q: (all if op == "and" else any)(fn(q) for fn in children)
+        field, *values = args
+        # The exchange download is already scoped to US Nasdaq listings.
+        if field == "region" and op == "eq" and values == ["us"]:
+            return lambda q: True
+        if field == "exchange" and op == "is-in" and set(values) == set(NASDAQ_EXCHANGES):
+            return lambda q: True
+        # Sector taxonomies differ; trailing-year change is absent. Fail explicitly
+        # rather than silently drop either filter or invent missing market data.
+        if field not in fields or op not in ("gt", "gte", "lt", "lte", "eq", "btwn"):
+            raise MarketDataUnavailable(f"Nasdaq fallback cannot preserve filter {field}")
+        key = fields[field]
+        def match(q):
+            value = q.get(key)
+            if value is None:
+                return False
+            if op == "gt": return value > values[0]
+            if op == "gte": return value >= values[0]
+            if op == "lt": return value < values[0]
+            if op == "lte": return value <= values[0]
+            if op == "eq": return value == values[0]
+            return values[0] <= value <= values[1]
+        return match
+
+    match = predicate(query.to_dict())
+    if sort_field not in fields:
+        raise MarketDataUnavailable("Unsupported Nasdaq sort field")
+    quotes = [q for q in _nasdaq_quotes() if match(q)]
+    key = fields[sort_field]
+    present = [q for q in quotes if q.get(key) is not None]
+    missing = [q for q in quotes if q.get(key) is None]
+    present.sort(key=lambda q: q[key], reverse=not sort_asc)
+    quotes = present + missing
+    return quotes[:fetch_cap]
 
 # Yahoo's screener has no predefined crypto universe and EquityQuery's region/exchange
 # fields don't cover the crypto exchange ("CCC"), so the crypto list is curated and
@@ -85,12 +184,25 @@ def _sector_clause(sector: Optional[str]) -> Optional[EquityQuery]:
 
 
 def _fetch_all_quotes(query, sort_field: str, sort_asc: bool, fetch_cap: int) -> list[dict]:
+    try:
+        return _fetch_yahoo_quotes(query, sort_field, sort_asc, fetch_cap)
+    except Exception:
+        logger.warning("Yahoo screener unavailable; trying Nasdaq public screener", exc_info=True)
+        try:
+            return _nasdaq_fallback(query, sort_field, sort_asc, fetch_cap)
+        except Exception as exc:
+            raise MarketDataUnavailable("Market data providers unavailable for this query") from exc
+
+
+def _fetch_yahoo_quotes(query, sort_field: str, sort_asc: bool, fetch_cap: int) -> list[dict]:
     page_size = 250
     all_quotes: list[dict] = []
     offset = 0
     while offset < fetch_cap:
         res = yf.screen(query, sortField=sort_field, sortAsc=sort_asc, size=page_size, offset=offset)
-        quotes = (res or {}).get("quotes", [])
+        if not isinstance(res, dict) or not isinstance(res.get("quotes"), list):
+            raise MarketDataUnavailable("Yahoo returned an invalid screener response")
+        quotes = res["quotes"]
         if not quotes:
             break
         all_quotes.extend(quotes)
@@ -158,9 +270,9 @@ def scan_nasdaq(
         all_quotes = _fetch_all_quotes(
             query, sort_field="percentchange", sort_asc=(direction == "losers"), fetch_cap=fetch_cap,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 
@@ -210,9 +322,9 @@ def scan_broken_stocks(
         all_quotes = _fetch_all_quotes(
             query, sort_field="fiftytwowkpercentchange", sort_asc=True, fetch_cap=fetch_cap,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 
@@ -310,9 +422,9 @@ def scan_by_cap(
 
     try:
         all_quotes = _fetch_all_quotes(query, sort_field=sort_field, sort_asc=sort_asc, fetch_cap=fetch_cap)
-    except Exception:
+    except Exception as exc:
         logger.exception("Yahoo Finance screener request failed")
-        return ScanQueryResult(candidates=[], total_matches=0)
+        raise MarketDataUnavailable("Yahoo Finance screener request failed") from exc
 
     candidates = [c for q in all_quotes if (c := _quote_to_candidate(q, exclude_derivatives))]
 

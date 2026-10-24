@@ -105,7 +105,7 @@ def setup(symbol):
         symbol=symbol, name=None, direction="up", zone_bottom=1, zone_top=2,
         zone_start_time="2026-08-01T04:00:00+00:00", price=2.5,
         breakout_time="2026-10-01T04:00:00+00:00", retest_times=["2026-10-20T04:00:00+00:00"] * 3,
-        bounced=False, key=f"k:{symbol}",
+        key=f"k:{symbol}",
     )
 
 

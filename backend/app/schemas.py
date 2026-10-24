@@ -453,7 +453,6 @@ class RetestSetupOut(BaseModel):
     price: float
     breakout_time: str
     retest_times: list[str]
-    bounced: bool
 
 
 class RetestAlertScanOut(BaseModel):

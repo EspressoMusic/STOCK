@@ -63,7 +63,6 @@ class RetestSetup:
     price: float
     breakout_time: str
     retest_times: list[str]  # oldest first; the MIN_RETESTS-th is the one that triggered
-    bounced: bool  # price has already pulled clear of the zone again after the last retest
     key: str  # one alert per setup: symbol + direction + breakout candle
 
 
@@ -184,7 +183,10 @@ def _evaluate(symbol: str, name: Optional[str]) -> Optional[RetestSetup]:
     up = breakout.dir == "up"
     leave = LEAVE * zone.unit
     after = candles[retests[-1] + 1:]
-    bounced = any(c.close > zone.top + leave if up else c.close < zone.bottom - leave for c in after)
+    # Only stocks still sitting on the zone — once price has pulled clear of it again
+    # after the last retest, the entry is gone (the user asked for these alone).
+    if any(c.close > zone.top + leave if up else c.close < zone.bottom - leave for c in after):
+        return None
     breakout_time = _iso(candles[breakout.idx].time)
     return RetestSetup(
         symbol=symbol,
@@ -196,7 +198,6 @@ def _evaluate(symbol: str, name: Optional[str]) -> Optional[RetestSetup]:
         price=_round_sig(candles[-1].close),
         breakout_time=breakout_time,
         retest_times=[_iso(candles[i].time) for i in retests],
-        bounced=bounced,
         key=f"retest3:1d:{symbol}:{breakout.dir}:{breakout_time[:10]}",
     )
 
@@ -235,7 +236,6 @@ def chart_url(s: RetestSetup) -> str:
 
 def format_message(s: RetestSetup) -> str:
     head = "🟢 פריצה למעלה" if s.direction == "up" else "🔴 שבירה למטה"
-    where = "התרחק שוב מהאזור" if s.bounced else "עדיין על האזור"
     lines = [f"{head} + {len(s.retest_times)} ריטסטים · <b>{html.escape(s.symbol)}</b> (יומי)"]
     if s.name:
         lines.append(html.escape(s.name))
@@ -243,7 +243,7 @@ def format_message(s: RetestSetup) -> str:
         f"אזור: {_price(s.zone_bottom)}–{_price(s.zone_top)}",
         f"פריצה: {_local_date(s.breakout_time)}",
         f"ריטסטים: {', '.join(_local_date(t) for t in s.retest_times)}",
-        f"מחיר: {_price(s.price)} · {where}",
+        f"מחיר: {_price(s.price)} · עדיין על האזור",
         f"{telegram.link(telegram.tradingview_url(s.symbol), 'TradingView')}"
         f" · {telegram.link(chart_url(s), 'בסורק עם הסימון')}",
     ]

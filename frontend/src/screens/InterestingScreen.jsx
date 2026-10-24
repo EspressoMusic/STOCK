@@ -7,6 +7,7 @@ import EmaTouch4hPanel from "../components/EmaTouch4hPanel";
 import EmaDoubleTouchForexPanel from "../components/EmaDoubleTouchForexPanel";
 import PatternStrategyPanel from "../components/PatternStrategyPanel";
 import TripleTouchPanel from "../components/TripleTouchPanel";
+import StochExtremePanel from "../components/StochExtremePanel";
 import { getLatestScan, runScan, getCryptoScan, getCapScan } from "../api";
 import { useLang } from "../context/LangContext";
 import useTechScanSettings from "../hooks/useTechScanSettings";
@@ -30,6 +31,7 @@ const STOCK_CATEGORIES = [
   { id: "gainers", key: "interesting.gainers" },
   { id: "broken", key: "interesting.broken" },
   { id: "triple-touch", key: "interesting.tripleTouch" },
+  { id: "stoch-extreme", key: "interesting.stochExtreme" },
 ];
 
 const FOREX_CATEGORIES = [
@@ -349,6 +351,9 @@ export default function InterestingScreen() {
         />
       )}
       {market === "stocks" && category === "technical" && <TechnicalCategory />}
+      {market === "stocks" && category === "stoch-extreme" && (
+        <StochExtremePanel ref={activeListRef} onBusyChange={setScanBusy} onScannedAt={setLastScanAt} />
+      )}
 
       {market === "crypto" && category === "movers" && (
         <MarketList

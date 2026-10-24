@@ -98,3 +98,31 @@ class AuthSession(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="sessions")
+
+
+class ZoneTrainingChart(Base):
+    """One chart the user reviewed in the zone trainer (frontend/trainer.html), kept as
+    training data for the zone detector (frontend/src/lib/zones.js). payload_json holds
+    a frozen snapshot of the candles, the user's marks (bot zones/breakouts they called
+    right or wrong, and the ones they drew because the bot missed them), a free-text
+    note and the detector settings, so the chart can be replayed against any later
+    version of the detector. A symbol + timeframe can be trained more than once."""
+    __tablename__ = "zone_training_charts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+
+
+class SentAlert(Base):
+    """A Telegram alert that already went out, so the daily run never sends the same
+    setup twice. key identifies the setup itself (see retest_alerts.RetestSetup.key)."""
+    __tablename__ = "sent_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

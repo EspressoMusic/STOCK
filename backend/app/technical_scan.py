@@ -3,6 +3,8 @@ stocks plus a fixed set of major forex pairs for 5- or 15-minute candles where S
 RSI is overbought/oversold AND the same candle's [low, high] range is touching (or nearly
 touching) the EMA50 — a confluence some traders use as a reversal/reaction signal."""
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -113,7 +115,7 @@ class EmaTouch4hScanResult:
     stocks: list[EmaTouchCandidate]
 
 
-def _get_stock_universe(limit: int) -> list[tuple[str, Optional[str]]]:
+def _get_stock_universe(limit: int, min_volume: int = 300_000) -> list[tuple[str, Optional[str]]]:
     """Liquid Nasdaq stocks, ranked by trading volume — a cheap pre-filter so the
     expensive per-symbol candle fetch below only runs on names worth watching."""
     query = EquityQuery(
@@ -121,7 +123,7 @@ def _get_stock_universe(limit: int) -> list[tuple[str, Optional[str]]]:
         [
             EquityQuery("eq", ["region", "us"]),
             EquityQuery("is-in", ["exchange", *NASDAQ_EXCHANGES]),
-            EquityQuery("gt", ["dayvolume", 300_000]),
+            EquityQuery("gt", ["dayvolume", min_volume]),
         ],
     )
     try:
@@ -587,24 +589,36 @@ def scan_pattern_strategy() -> PatternScanResult:
     )
 
 
-TRIPLE_TOUCH_TIMEFRAME = "1h"
-TRIPLE_TOUCH_HISTORY_PERIOD = "1mo"
-# Every distance below is measured in "candle units" — the average hourly high-low range
+# 4h candles, built from 1h bars — this much 1h history leaves EMA50 well settled even
+# for stocks, which only get 2 four-hour candles per session.
+TRIPLE_TOUCH_HISTORY_PERIOD = "6mo"
+# Every distance below is measured in "candle units" — the average 4h high-low range
 # over the last TRIPLE_TOUCH_UNIT_BARS bars — so one rule fits a $400 stock, a $3 stock
 # and a forex pair moving a few pips an hour alike.
 TRIPLE_TOUCH_UNIT_BARS = 50
 TRIPLE_TOUCH_MIN_REJECTIONS = 3  # completed "came to the level and fell back" cycles
-TRIPLE_TOUCH_MAX_SPAN = 30  # first touch → last touch must fit in this many hourly candles ("not too drawn out")
-TRIPLE_TOUCH_MAX_AGE = 10  # the last touch must be within this many candles of now to still be a live setup
+# First touch → last touch must fit in this many 4h candles ("not too drawn out").
+# Counted in candles, not days: 12 is two days on forex/crypto (6 candles a day) and
+# about six trading days on stocks (2 a session) — the spread the user trades on each.
+TRIPLE_TOUCH_MAX_SPAN = 12
+TRIPLE_TOUCH_MAX_AGE = 4  # the last touch must be within this many candles of now to still be a live setup
 TRIPLE_TOUCH_ZONE_UNITS = 0.75  # touches within this far of the level's extreme count as "the same place"
 TRIPLE_TOUCH_PULLBACK_UNITS = 2.0  # between touches price must move at least this far away from the level
+# ...and get there with a breakout-like push: at least one candle after the touch must
+# move away from the level by this much, close vs previous close (so a gap counts but a
+# gap that's then sold off doesn't). An average 4h candle nets roughly half a unit, so
+# this asks for about twice a normal candle's move.
+TRIPLE_TOUCH_PUSH_UNITS = 0.75
 TRIPLE_TOUCH_MAX_DISTANCE_UNITS = 6.0  # price already ran further than this from the level → setup has played out
 # Trend filter: EMA50 now vs this many candles ago decides whether it's falling or rising.
 TRIPLE_TOUCH_EMA_SLOPE_BARS = 10
-# Stocks only: sub-$1 names are mostly noise, and a stock whose hourly candles barely
-# move (e.g. pinned by a pending buyout) "touches" any level on tiny wiggles.
-TRIPLE_TOUCH_MIN_STOCK_PRICE = 1.0
-TRIPLE_TOUCH_MIN_STOCK_UNIT_PCT = 0.002
+# Stocks only: a stock whose 4h candles barely move (e.g. pinned by a pending buyout)
+# "touches" any level on tiny wiggles. No price floor — penny stocks are in on purpose.
+TRIPLE_TOUCH_MIN_STOCK_UNIT_PCT = 0.004
+# The stock universe is a couple of thousand symbols, one Yahoo request each. Fired as
+# fast as the workers go (~20/s) it gets the whole server rate-limited by Yahoo for a
+# while, so the stock scan is paced; forex/crypto are a few dozen symbols and aren't.
+TRIPLE_TOUCH_STOCK_REQUESTS_PER_SECOND = 5.0
 
 TRIPLE_TOUCH_MARKETS = ("stocks", "forex", "crypto")
 # Wider than FOREX_PAIRS — this pattern is common on the crosses too, and the user asked
@@ -639,6 +653,7 @@ class TripleTouchCandidate:
     touch_count: int
     at_level: bool  # price is back at the level right now (another test in progress)
     distance_pct: float  # current close's distance from the level, % of price
+    stoch_k: float  # Stoch RSI %K on the current 4h candle
     touch_times: list[str]  # the extreme candle of each touch, oldest first
     candle_time: str
 
@@ -658,8 +673,10 @@ def _find_repeated_rejections(
     falls away from it, again and again. The support case reuses it on negated prices.
 
     A "touch" is a run of consecutive candles whose top reaches the zone; it only ends
-    once price has dropped at least TRIPLE_TOUCH_PULLBACK_UNITS away from the level, so
-    a few candles hovering at the level count once, not several times. The zone hangs
+    once price has dropped at least TRIPLE_TOUCH_PULLBACK_UNITS away from the level, with
+    at least one candle along the way falling TRIPLE_TOUCH_PUSH_UNITS or more, so a few
+    candles hovering at the level count once, not several times, and a slow drift away
+    isn't a rejection. Both are counted from the touch's highest candle. The zone hangs
     from the highest top since the first touch, which also means nothing has broken
     above it since — but the level reported is the median of the touch tops, i.e. where
     price actually kept turning, so one wick poking past the others doesn't drag the
@@ -685,20 +702,27 @@ def _find_repeated_rejections(
         pullback_line = level - TRIPLE_TOUCH_PULLBACK_UNITS * unit
 
         touches: list[int] = []
-        armed = True  # ready to register a new touch (price has pulled back since the last one)
+        armed = True  # ready to register a new touch (price has been rejected since the last one)
+        pulled_back = pushed = False
         for i in range(start, n):
             touched_now = top[i] >= zone_edge
             if touched_now:
                 if armed:
                     touches.append(i)
                     armed = False
+                    pulled_back = pushed = False
                 elif top[i] > top[touches[-1]]:
                     touches[-1] = i
-            # A single candle can both tag the level and fall away from it, but a wick
-            # alone doesn't say which came first — only trusted when it *closes* past
-            # the pullback line (a real rejection candle).
-            if not armed and bottom[i] <= pullback_line and (not touched_now or close[i] <= pullback_line):
-                armed = True
+                    pulled_back = pushed = False
+            if not armed:
+                # A single candle can both tag the level and fall away from it, but a wick
+                # alone doesn't say which came first — only trusted when it *closes* past
+                # the pullback line (a real rejection candle).
+                pulled_back = pulled_back or (
+                    bottom[i] <= pullback_line and (not touched_now or close[i] <= pullback_line)
+                )
+                pushed = pushed or close[i - 1] - close[i] >= TRIPLE_TOUCH_PUSH_UNITS * unit
+                armed = pulled_back and pushed
 
         if top[touches[0]] <= top[touches[0] - 1]:
             continue
@@ -710,19 +734,24 @@ def _find_repeated_rejections(
         if n - 1 - touches[-1] > TRIPLE_TOUCH_MAX_AGE:
             continue
         touch_level = float(pd.Series(top[touches]).median())
-        return touch_level, float(zone_edge), touches, not armed
+        # Pulled back without the push isn't a rejection, but price isn't at the level
+        # either — unless it has since drifted back into the zone.
+        at_level = not armed and (not pulled_back or top[n - 1] >= zone_edge)
+        return touch_level, float(zone_edge), touches, at_level
 
     return None
 
 
-def _detect_triple_touch(df: pd.DataFrame) -> Optional[tuple[str, float, float, list[pd.Timestamp], bool]]:
-    """Hourly candles that hit the same price area at least three times within a short
+def _detect_triple_touch(df: pd.DataFrame) -> Optional[tuple[str, float, float, list[pd.Timestamp], bool, float]]:
+    """4h candles that hit the same price area at least three times within a short
     stretch and got pushed back each time — but only in the direction of the trend, like
     the setup this models: rejections from resistance while price is below a falling
     EMA50 (short), or bounces off support while it's above a rising EMA50 (long). A
-    support "bounce" in a downtrend is just a pause on the way down.
+    support "bounce" in a downtrend is just a pause on the way down. Stoch RSI must
+    also leave the trade room to run: no short while it's already oversold, no long
+    while it's already overbought.
 
-    Returns (direction, level, zone_edge, touch candle times, at_level) or None."""
+    Returns (direction, level, zone_edge, touch candle times, at_level, stoch_k) or None."""
     # +1 for the current candle, +1 so the earliest possible first touch still has a
     # candle before it to compare against.
     window_len = TRIPLE_TOUCH_MAX_SPAN + TRIPLE_TOUCH_MAX_AGE + 2
@@ -759,7 +788,34 @@ def _detect_triple_touch(df: pd.DataFrame) -> Optional[tuple[str, float, float, 
     direction, level, zone_edge, touches, at_level = found[0]  # the trends are exclusive, so at most one side
     if abs(last_close - level) > TRIPLE_TOUCH_MAX_DISTANCE_UNITS * unit:
         return None
-    return direction, level, zone_edge, [window.index[p] for p in touches], at_level
+
+    stoch_k = float(_stoch_rsi(df["Close"])[0].iloc[-1])
+    if pd.isna(stoch_k):
+        return None
+    if direction == "short" and stoch_k <= settings.technical_stochrsi_oversold:
+        return None
+    if direction == "long" and stoch_k >= settings.technical_stochrsi_overbought:
+        return None
+    return direction, level, zone_edge, [window.index[p] for p in touches], at_level, stoch_k
+
+
+class _RateLimiter:
+    """Spaces wait() returns at least 1/per_second apart, across all threads."""
+
+    def __init__(self, per_second: float):
+        self._interval = 1 / per_second
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + self._interval
+        time.sleep(slot - now)
+
+
+_stock_fetch_limiter = _RateLimiter(TRIPLE_TOUCH_STOCK_REQUESTS_PER_SECOND)
 
 
 def _round_sig(value: float) -> float:
@@ -768,21 +824,13 @@ def _round_sig(value: float) -> float:
 
 
 def _evaluate_triple_touch(symbol: str, name: Optional[str], market: str) -> Optional[TripleTouchCandidate]:
-    try:
-        df = yf.Ticker(symbol).history(interval=TRIPLE_TOUCH_TIMEFRAME, period=TRIPLE_TOUCH_HISTORY_PERIOD)
-    except Exception:
-        logger.warning("Triple-touch scan: history fetch failed for %s", symbol)
-        return None
-
+    if market == "stocks":
+        _stock_fetch_limiter.wait()
+    df = get_4h_dataframe(symbol, period=TRIPLE_TOUCH_HISTORY_PERIOD)
     if df is None or df.empty:
-        return None
-    df = df.dropna(subset=["Open", "High", "Low", "Close"])
-    if df.empty:
         return None
     last_close = float(df["Close"].iloc[-1])
     if market == "stocks":
-        if last_close < TRIPLE_TOUCH_MIN_STOCK_PRICE:
-            return None
         # Median, not mean — one gap candle (e.g. the buyout announcement) would
         # otherwise mask weeks of flat-lined bars.
         typical_range = (df["High"] - df["Low"]).iloc[-TRIPLE_TOUCH_UNIT_BARS:].median()
@@ -792,7 +840,7 @@ def _evaluate_triple_touch(symbol: str, name: Optional[str], market: str) -> Opt
     detected = _detect_triple_touch(df)
     if detected is None:
         return None
-    direction, level, zone_edge, touch_times, at_level = detected
+    direction, level, zone_edge, touch_times, at_level, stoch_k = detected
 
     def iso(ts: pd.Timestamp) -> str:
         return ts.to_pydatetime().astimezone(timezone.utc).isoformat()
@@ -807,20 +855,24 @@ def _evaluate_triple_touch(symbol: str, name: Optional[str], market: str) -> Opt
         touch_count=len(touch_times),
         at_level=at_level,
         distance_pct=round(abs(last_close - level) / last_close * 100, 2),
+        stoch_k=round(stoch_k, 1),
         touch_times=[iso(ts) for ts in touch_times],
         candle_time=iso(df.index[-1]),
     )
 
 
-def scan_triple_touch_1h(market: str) -> TripleTouchScanResult:
+def scan_triple_touch_4h(market: str) -> TripleTouchScanResult:
     """On-demand scan (not scheduled, not persisted) for the triple-rejection pattern on
-    hourly candles, over liquid Nasdaq stocks, major + cross forex pairs, or the curated
-    crypto list, depending on `market`."""
+    4h candles, over practically every traded Nasdaq stock (small caps and penny stocks
+    included), major + cross forex pairs, or the curated crypto list, depending on
+    `market`."""
     if market not in TRIPLE_TOUCH_MARKETS:
         raise ValueError(f"market must be one of {TRIPLE_TOUCH_MARKETS}")
 
     if market == "stocks":
-        universe = _get_stock_universe(settings.triple_touch_stock_universe_size)
+        universe = _get_stock_universe(
+            settings.triple_touch_stock_universe_size, min_volume=settings.triple_touch_min_stock_volume
+        )
     elif market == "forex":
         universe = FOREX_PAIRS + TRIPLE_TOUCH_EXTRA_FOREX
     else:
@@ -874,4 +926,117 @@ def scan_technical_signals(timeframe: str = DEFAULT_TIMEFRAME) -> TechnicalScanR
         universe_forex_count=len(FOREX_PAIRS),
         stocks=stocks,
         forex=forex,
+    )
+
+
+# "Shilo 2": Stoch RSI at an extreme on the daily chart AND on the 4h chart at the same
+# time, in the same direction — a stretched move both the bigger and the smaller
+# timeframe agree on. Overbought on one and oversold on the other doesn't count.
+STOCH_EXTREME_DAILY_PERIOD = "1y"  # ~250 daily bars, plenty for the RSI to settle
+STOCH_EXTREME_4H_PERIOD = "3mo"  # of 1h bars → ~125 four-hour candles
+
+
+@dataclass
+class StochExtremeCandidate:
+    symbol: str
+    name: Optional[str]
+    signal: str  # "overbought" | "oversold" — the same on both timeframes
+    price: float
+    daily_k: float
+    daily_d: float
+    h4_k: float
+    h4_d: float
+    candle_time: str  # the current 4h candle
+
+
+@dataclass
+class StochExtremeScanResult:
+    scanned_at: str
+    universe_stock_count: int
+    stocks: list[StochExtremeCandidate]
+
+
+def _stoch_extreme(close: pd.Series) -> Optional[tuple[str, float, float]]:
+    """(signal, %K, %D) when the latest candle's Stoch RSI %K is overbought/oversold —
+    the same thresholds as the intraday technical scan — else None."""
+    if len(close) < MIN_BARS:
+        return None
+    k, d = _stoch_rsi(close)
+    last_k, last_d = k.iloc[-1], d.iloc[-1]
+    if pd.isna(last_k) or pd.isna(last_d):
+        return None
+    if last_k >= settings.technical_stochrsi_overbought:
+        return "overbought", float(last_k), float(last_d)
+    if last_k <= settings.technical_stochrsi_oversold:
+        return "oversold", float(last_k), float(last_d)
+    return None
+
+
+def _evaluate_stoch_extreme(symbol: str, name: Optional[str]) -> Optional[StochExtremeCandidate]:
+    # Daily first: most stocks aren't stretched on the daily chart, and those are dropped
+    # before spending a second (rate-limited) request on their 1h bars.
+    _stock_fetch_limiter.wait()
+    try:
+        daily = yf.Ticker(symbol).history(interval="1d", period=STOCH_EXTREME_DAILY_PERIOD)
+    except Exception:
+        logger.warning("Stoch extreme scan: daily history fetch failed for %s", symbol)
+        return None
+    if daily is None or daily.empty:
+        return None
+    on_daily = _stoch_extreme(daily["Close"].dropna())
+    if on_daily is None:
+        return None
+
+    _stock_fetch_limiter.wait()
+    df4h = get_4h_dataframe(symbol, period=STOCH_EXTREME_4H_PERIOD)
+    if df4h is None or df4h.empty:
+        return None
+    last_close = float(df4h["Close"].iloc[-1])
+    # Same filter as the triple-touch scan: a stock pinned in place (e.g. by a pending
+    # buyout) swings Stoch RSI from end to end on tiny wiggles.
+    typical_range = (df4h["High"] - df4h["Low"]).iloc[-TRIPLE_TOUCH_UNIT_BARS:].median()
+    if typical_range < last_close * TRIPLE_TOUCH_MIN_STOCK_UNIT_PCT:
+        return None
+    on_4h = _stoch_extreme(df4h["Close"])
+    if on_4h is None or on_4h[0] != on_daily[0]:
+        return None
+
+    signal, daily_k, daily_d = on_daily
+    _, h4_k, h4_d = on_4h
+    return StochExtremeCandidate(
+        symbol=symbol,
+        name=name,
+        signal=signal,
+        price=_round_sig(last_close),
+        daily_k=round(daily_k, 1),
+        daily_d=round(daily_d, 1),
+        h4_k=round(h4_k, 1),
+        h4_d=round(h4_d, 1),
+        candle_time=df4h.index[-1].to_pydatetime().astimezone(timezone.utc).isoformat(),
+    )
+
+
+def scan_stoch_extreme_daily_4h() -> StochExtremeScanResult:
+    """On-demand scan (not scheduled, not persisted) for Nasdaq stocks whose Stoch RSI is
+    overbought on both the daily and the 4h chart, or oversold on both."""
+    stock_universe = _get_stock_universe(
+        settings.stoch_extreme_stock_universe_size, min_volume=settings.stoch_extreme_min_stock_volume
+    )
+
+    stocks: list[StochExtremeCandidate] = []
+    with ThreadPoolExecutor(max_workers=settings.technical_scan_workers) as pool:
+        futures = [pool.submit(_evaluate_stoch_extreme, sym, name) for sym, name in stock_universe]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result is not None:
+                stocks.append(result)
+
+    # Overbought first, then oversold; within each, the most stretched (both %K values
+    # furthest into the extreme) on top.
+    stocks.sort(key=lambda c: (c.signal != "overbought", -abs(c.daily_k + c.h4_k - 100)))
+
+    return StochExtremeScanResult(
+        scanned_at=datetime.now(timezone.utc).isoformat(),
+        universe_stock_count=len(stock_universe),
+        stocks=stocks,
     )

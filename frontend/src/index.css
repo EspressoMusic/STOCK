@@ -456,6 +456,16 @@ html, body {
   color: var(--up);
 }
 
+.chg-badge.chg-overbought {
+  background: var(--overbought-bg);
+  color: var(--overbought);
+}
+
+.chg-badge.chg-oversold {
+  background: var(--oversold-bg);
+  color: var(--oversold);
+}
+
 .chg-badge.chg-broken {
   background: var(--broken-bg);
   color: var(--broken);
@@ -2359,6 +2369,152 @@ html, body {
   background: var(--accent);
   color: white;
   font-weight: 700;
+}
+
+/* Zones button + menu (chart screen). Zone colors match lib/zonesPrimitive.js. */
+.zones-trigger.is-on {
+  background: var(--accent);
+  color: #17140c;
+}
+
+.zones-menu {
+  min-width: 210px;
+}
+
+/* The zones button itself turns them on/off; the narrow button beside it (shown only
+   while they're on) opens their settings. */
+.zones-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.zones-settings-trigger {
+  width: 20px;
+  padding: 0;
+}
+
+.zones-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.zones-touch-options {
+  display: flex;
+  gap: 4px;
+}
+
+.tf-dropdown-menu .zones-touch-options button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.zones-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.zones-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 10px;
+  margin-inline-end: 7px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.zones-swatch.is-zone {
+  background: rgba(37, 120, 235, 0.2);
+  border: 1px solid rgba(37, 120, 235, 0.65);
+}
+
+.zones-swatch.is-break {
+  background: rgba(22, 163, 74, 0.35);
+  border: 1px solid rgba(22, 163, 74, 0.95);
+}
+
+.zones-anchor-trigger.is-on {
+  background: var(--accent);
+  color: #17140c;
+}
+
+/* The zones start line: zones and breakout+retest are only looked for to its right, and
+   the candles before it are dimmed. Its strip is wide enough to grab and drag sideways. */
+.chart-anchor-shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(23, 20, 12, 0.08);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.chart-anchor-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 4;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chart-anchor-line::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: 2px dashed #17140c;
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+
+.chart-anchor-line.is-dragging::before {
+  border-left-style: solid;
+}
+
+/* Below the symbol/price block in the top bar. */
+.chart-anchor-label,
+.chart-anchor-hint {
+  position: absolute;
+  top: 104px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: #fff;
+  background: #17140c;
+  pointer-events: none;
+}
+
+.chart-anchor-hint {
+  z-index: 4;
+  font-size: 0.75rem;
+  padding: 5px 12px;
 }
 
 .symbol-picker-modal {

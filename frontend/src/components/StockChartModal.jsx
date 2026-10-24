@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, createSeriesMarkers, CandlestickSeries, LineSeries, LineStyle } from "lightweight-charts";
 import { getCandles } from "../api";
+import { computeEma } from "../lib/ema";
 
 const TIMEFRAMES = [
   { value: "15m", label: "15 דקות" },
@@ -13,17 +14,6 @@ const EMA_PERIOD = 50;
 const EMA_COLOR = "#2962ff";
 // Candles of context shown before the first marked touch when zooming in on a pattern.
 const PATTERN_LEAD_BARS = 30;
-
-// Same formula as the backend's technical-scan EMA (pandas .ewm(span, adjust=False).mean()).
-function computeEma(candles, period) {
-  if (candles.length === 0) return [];
-  const alpha = 2 / (period + 1);
-  let prev = candles[0].close;
-  return candles.map((c, i) => {
-    prev = i === 0 ? c.close : c.close * alpha + prev * (1 - alpha);
-    return { time: c.time, value: prev };
-  });
-}
 
 function readThemeColors() {
   const style = getComputedStyle(document.documentElement);

@@ -1,0 +1,324 @@
+/* Desktop chart window (trainer.html) — the app's look: cream paper, thick ink borders,
+   hard offset shadows. */
+
+.trainer {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+  padding: 16px 20px 18px;
+  background: var(--ground);
+  color: var(--text);
+}
+
+.trainer button {
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.trainer-error {
+  color: var(--down);
+  font-weight: 700;
+}
+
+/* In a narrow window the controls wrap to a second row instead of being cut off. */
+.trainer-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.trainer-search {
+  position: relative;
+  margin: 0;
+}
+
+.trainer-search input {
+  width: 220px;
+  padding: 9px 12px;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.trainer-suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+  overflow: hidden;
+}
+
+.trainer-suggestions button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 12px;
+  border: none;
+  border-top: 1px solid var(--surface-cream-dark);
+  background: none;
+  text-align: start;
+}
+
+.trainer-suggestions button:hover {
+  background: var(--surface-cream);
+}
+
+.trainer-suggestions span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trainer-seg {
+  display: flex;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.trainer-seg button {
+  padding: 9px 14px;
+  border: none;
+  border-inline-start: 2px solid var(--border);
+  background: none;
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trainer-seg button:first-child {
+  border-inline-start: none;
+}
+
+.trainer-seg button.active {
+  background: var(--accent);
+}
+
+/* The colors and light/dark buttons, at the far end of the header. */
+.trainer-header-end {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 12px;
+}
+
+.trainer-pill-btn {
+  padding: 9px 14px;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.trainer-pill-btn.active {
+  background: var(--accent);
+}
+
+.trainer-colors {
+  position: relative;
+}
+
+.trainer-colors-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-end: 0;
+  z-index: 20;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 3px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 3px 3px 0 var(--hard-shadow);
+}
+
+.trainer-colors-panel label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trainer-colors-panel input[type="color"] {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.trainer-colors-reset {
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-cream-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.trainer-colors-panel small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.trainer-chart-wrap {
+  position: relative;
+  min-height: 0;
+  border: 3px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--chart-bg);
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+  overflow: hidden;
+}
+
+.trainer-chart {
+  position: absolute;
+  inset: 0;
+}
+
+.trainer-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--chart-bg) 85%, transparent);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+/* The start line and its dimmed left side (styles shared with the app's chart, see
+   index.css) stop above the time axis; their pills sit at the top of the chart. */
+.trainer-chart-wrap .chart-anchor-shade,
+.trainer-chart-wrap .chart-anchor-line {
+  bottom: auto;
+}
+
+.trainer-chart-wrap .chart-anchor-label {
+  top: 10px;
+}
+
+.trainer-chart-wrap .chart-anchor-hint {
+  top: 38px;
+}
+
+/* "The marking from the Telegram alert", with an ✕ back to the usual marking. */
+.trainer-chart-wrap .trainer-alert-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.trainer-alert-hint button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.trainer-alert-hint button:hover {
+  opacity: 1;
+}
+
+/* index.css draws these in dark ink for the light chart. */
+:root[data-theme="dark"] .trainer-chart-wrap .chart-anchor-shade {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="dark"] .trainer-chart-wrap .chart-anchor-line::before {
+  border-left-color: var(--ink);
+}
+
+:root[data-theme="dark"] .trainer-chart-wrap .chart-anchor-label,
+:root[data-theme="dark"] .trainer-chart-wrap .chart-anchor-hint {
+  color: var(--ground);
+  background: var(--ink);
+}
+
+/* The picked strategy's results on the chart on screen, small, in the bottom-left corner
+   (the start line's label and hint sit at the top). */
+.trainer-strategy {
+  position: absolute;
+  bottom: 38px;
+  left: 10px;
+  z-index: 5;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.trainer-strategy p {
+  margin: 0;
+}
+
+.trainer-strategy small {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.trainer-strategy-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.trainer-strategy-legend i {
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--border);
+  border-radius: 2px;
+}
+
+.trainer-strategy-legend i:nth-of-type(2) {
+  margin-inline-start: 8px;
+}
+
+.trainer-strategy .good {
+  color: var(--up);
+  font-weight: 800;
+}
+
+.trainer-strategy .bad {
+  color: var(--down);
+  font-weight: 800;
+}

@@ -1,8 +1,8 @@
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import Scan, StockResult
 
@@ -204,6 +204,7 @@ class TripleTouchCandidateOut(BaseModel):
     touch_count: int
     at_level: bool
     distance_pct: float
+    stoch_k: float
     touch_times: list[str]
     candle_time: str
 
@@ -213,6 +214,26 @@ class TripleTouchScanOut(BaseModel):
     scanned_at: str
     universe_count: int
     results: list[TripleTouchCandidateOut]
+
+
+class StochExtremeCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: Optional[str] = None
+    signal: str
+    price: float
+    daily_k: float
+    daily_d: float
+    h4_k: float
+    h4_d: float
+    candle_time: str
+
+
+class StochExtremeScanOut(BaseModel):
+    scanned_at: str
+    universe_stock_count: int
+    stocks: list[StochExtremeCandidateOut]
 
 
 class CandleOut(BaseModel):
@@ -382,3 +403,85 @@ class GoogleAuthIn(BaseModel):
 class AuthResultOut(BaseModel):
     token: str
     user: UserOut
+
+
+class ZoneMark(BaseModel):
+    """One thing the user marked in the zone trainer. source "bot": something the detector
+    drew, which they called right (verdict "ok") or wrong ("wrong"); source "user": a box
+    they drew because the detector missed it (always "ok"). Stored by geometry rather than
+    by detector id so it still lines up after the detector changes. Times are the unix
+    seconds of the first and last candle it covers; top/bottom are prices."""
+    id: str = Field(max_length=64)
+    kind: Literal["zone", "breakout_retest"]
+    source: Literal["bot", "user"]
+    verdict: Literal["ok", "wrong"]
+    from_time: int
+    to_time: int
+    top: float
+    bottom: float
+    dir: Optional[Literal["up", "down"]] = None  # breakouts the detector drew
+    algo_version: Optional[int] = None  # detector version that drew it (source "bot")
+    # The user's own words on why it's there, written after the trainer explained why the
+    # detector missed it — read when tuning the detector.
+    note: str = Field("", max_length=1000)
+
+
+class ZoneTrainingIn(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    timeframe: str = Field(pattern="^(5m|15m|30m|1h|4h|1d|1w)$")
+    marks: list[ZoneMark] = Field(default_factory=list, max_length=300)
+    note: str = Field("", max_length=4000)
+    params: dict = Field(default_factory=dict)  # detector settings: min_touches, algo_version
+    # Frozen when the chart was first opened, as [time, open, high, low, close] rows.
+    candles: list[list[float]] = Field(min_length=1, max_length=600)
+
+
+class ZoneTrainingOut(ZoneTrainingIn):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class RetestSetupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: Optional[str] = None
+    direction: str
+    zone_bottom: float
+    zone_top: float
+    price: float
+    breakout_time: str
+    retest_times: list[str]
+    bounced: bool
+
+
+class RetestAlertScanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scanned_at: str
+    universe_count: int
+    results: list[RetestSetupOut]
+    sent_count: int
+
+
+class ZoneTouchSetupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    name: Optional[str] = None
+    price: float
+    zone_bottom: float
+    zone_top: float
+    touch_count: int
+    touch_times: list[str]
+    distance_pct: float
+
+
+class ZoneTouchScanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scanned_at: str
+    universe_count: int
+    results: list[ZoneTouchSetupOut]
+    sent: bool

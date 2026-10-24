@@ -38,6 +38,10 @@ class ThickCandlestickRenderer {
     // on a tight zoom (e.g. a default view of ~40 narrow bars on a phone-width chart).
     const borderWidthBitmap = Math.max(1, Math.min(Math.round(options.borderWidth * hRatio), Math.floor(bodyWidthBitmap * 0.35)));
     const wickWidthBitmap = Math.max(1, Math.round(options.wickWidth * hRatio));
+    // A candle whose open and close (nearly) match — common on symbols that move a cent at a
+    // time — would be nothing but its border: a black dash that reads as a bar chart's tick.
+    // It gets a body at least this tall, so the fill still shows between the borders.
+    const minBodyBitmap = borderWidthBitmap * 2 + Math.max(Math.round(2 * vRatio), Math.round(bodyWidthBitmap * 0.2));
 
     for (let i = data.visibleRange.from; i < data.visibleRange.to; i++) {
       const bar = data.bars[i];
@@ -60,11 +64,14 @@ class ThickCandlestickRenderer {
       const wickX = xBitmap - Math.floor(wickWidthBitmap / 2);
       ctx.fillRect(wickX, highYBitmap, wickWidthBitmap, Math.max(1, lowYBitmap - highYBitmap));
 
-      const top = Math.min(openYBitmap, closeYBitmap);
-      const bodyHeight = Math.max(Math.abs(closeYBitmap - openYBitmap), borderWidthBitmap);
+      // Centered on the open/close, so a real body taller than the minimum is unchanged.
+      const bodyHeight = Math.max(Math.abs(closeYBitmap - openYBitmap), minBodyBitmap);
+      const top = (openYBitmap + closeYBitmap) / 2 - bodyHeight / 2;
       const bodyX = xBitmap - Math.floor(bodyWidthBitmap / 2);
 
-      ctx.fillStyle = isUp ? options.upColor : options.downColor;
+      // A bar's own `bodyColor` overrides the up/down fill. (Not `color`: the library pulls
+      // that out of custom-series data and falls back to the series' default color.)
+      ctx.fillStyle = bar.originalData.bodyColor ?? (isUp ? options.upColor : options.downColor);
       ctx.fillRect(bodyX, top, bodyWidthBitmap, bodyHeight);
 
       ctx.strokeStyle = options.borderColor;

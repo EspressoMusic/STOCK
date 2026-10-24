@@ -171,6 +171,17 @@ Body: {"direction": "broken"}     — ב-08:30
 | `SCAN_TIME_1` / `SCAN_TIME_2` | 09:45 / 16:15 | שעות הסריקה היומית (America/New_York) |
 | `BROKEN_SCAN_TIME` | 08:30 | שעת עדכון רשימת המניות השבורות |
 | `OPENAI_MODEL` | gpt-4o-mini | מודל OpenAI לניתוח |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | ריק | התראות טלגרם על פריצה + 3 ריטסטים (גרף יומי). ריק = כבוי |
+| `RETEST_ALERT_TIME` | 16:30 | שעת סריקת ההתראות, שני–שישי (America/New_York) |
+
+### התראות טלגרם (פריצה + 3 ריטסטים)
+
+1. בטלגרם: פתח את `@BotFather`, שלח `/newbot`, והעתק את הטוקן ל-`TELEGRAM_BOT_TOKEN` ב-`backend/.env`.
+2. שלח לבוט החדש הודעה כלשהי, ואז מתוך `backend`: `venv\Scripts\python -m app.telegram` — יודפס ה-chat id שלך; הכנס אותו ל-`TELEGRAM_CHAT_ID`.
+3. הרץ שוב את אותה פקודה — תגיע הודעת בדיקה. הפעל מחדש את השרת, והסריקה תרוץ כל יום אחרי הסגירה.
+
+כל התראה נשלחת פעם אחת בלבד (טבלת `sent_alerts`). להרצה ידנית: `POST /api/retest-alerts/run`.
+ההתראות עובדות רק כשהשרת דלוק — ב-Render החינמי השרת נרדם, אז שם צריך instance בתשלום.
 
 ## הערות חשובות
 

@@ -10,3 +10,4 @@ python-dotenv
 httpx
 google-auth
 requests>=2.31
+truststore>=0.9

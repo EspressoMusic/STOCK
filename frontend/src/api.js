@@ -118,8 +118,93 @@ export function runTripleTouchScan(market) {
   return request(`/api/triple-touch-scan/run?market=${market}`, { method: "POST" });
 }
 
+export function getLatestStochExtremeScan() {
+  return request("/api/stoch-extreme-scan/latest");
+}
+
+export function runStochExtremeScan() {
+  return request("/api/stoch-extreme-scan/run", { method: "POST" });
+}
+
+export function getLatestZoneTouchScan() {
+  return request("/api/zone-touch-scan/latest");
+}
+
+export function runZoneTouchScan() {
+  return request("/api/zone-touch-scan/run", { method: "POST" });
+}
+
 export function getCandles(symbol, timeframe = "1h") {
   return request(`/api/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
+}
+
+// Zone trainer charts (trainer.html). Marks (see lib/zoneTraining.js) and candles are
+// camelCase objects here; on the wire marks are snake_case and candles are
+// [time, open, high, low, close] rows.
+function trainingChartFromApi(c) {
+  return {
+    id: c.id,
+    symbol: c.symbol,
+    timeframe: c.timeframe,
+    note: c.note,
+    params: c.params,
+    updatedAt: c.updated_at,
+    marks: c.marks.map((m) => ({
+      id: m.id,
+      kind: m.kind,
+      source: m.source,
+      verdict: m.verdict,
+      fromTime: m.from_time,
+      toTime: m.to_time,
+      top: m.top,
+      bottom: m.bottom,
+      dir: m.dir,
+      algoVersion: m.algo_version,
+      note: m.note ?? "",
+    })),
+    candles: c.candles.map(([time, open, high, low, close]) => ({ time, open, high, low, close })),
+  };
+}
+
+function trainingChartToApi({ symbol, timeframe, marks, note, params, candles }) {
+  return JSON.stringify({
+    symbol,
+    timeframe,
+    note,
+    params,
+    marks: marks.map((m) => ({
+      id: m.id,
+      kind: m.kind,
+      source: m.source,
+      verdict: m.verdict,
+      from_time: m.fromTime,
+      to_time: m.toTime,
+      top: m.top,
+      bottom: m.bottom,
+      dir: m.dir ?? null,
+      algo_version: m.algoVersion ?? null,
+      note: m.note ?? "",
+    })),
+    candles: candles.map((c) => [c.time, c.open, c.high, c.low, c.close]),
+  });
+}
+
+export function listZoneTraining() {
+  return request("/api/zone-training").then((rows) => rows.map(trainingChartFromApi));
+}
+
+export function createZoneTraining(chart) {
+  return request("/api/zone-training", { method: "POST", body: trainingChartToApi(chart) }).then(trainingChartFromApi);
+}
+
+export function updateZoneTraining(id, chart) {
+  return request(`/api/zone-training/${id}`, { method: "PUT", body: trainingChartToApi(chart) }).then(
+    trainingChartFromApi
+  );
+}
+
+export function deleteZoneTraining(id) {
+  return request(`/api/zone-training/${id}`, { method: "DELETE" });
 }
 
 export function getQuote(symbol) {

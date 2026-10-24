@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries } from "lightweight-charts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createChart, createSeriesMarkers, LineSeries, LineStyle } from "lightweight-charts";
 import { getCandles, getQuote, searchSymbols } from "../api";
 import { formatPrice, formatPercent } from "../format";
 import { useLang } from "../context/LangContext";
@@ -8,6 +8,9 @@ import usePortfolio from "../hooks/usePortfolio";
 import useWatchlist from "../hooks/useWatchlist";
 import { TRADING_ENABLED } from "../features";
 import { ThickCandlestickSeries } from "../lib/thickCandlestickSeries";
+import { detectZonesFrom } from "../lib/zones";
+import { computeEma } from "../lib/ema";
+import { ZonesPrimitive } from "../lib/zonesPrimitive";
 
 const QTY_PRESETS = [1, 5, 10, 25, 50, 100];
 const EMA_PERIOD = 50;
@@ -22,6 +25,22 @@ const CANDLES_RETRY_MS = 5000;
 const NETWORK_ERROR = "network";
 const DEFAULT_PRICE_MARGINS = { top: 0.1, bottom: 0.1 };
 const VERTICAL_ZOOM_SENSITIVITY = 0.8;
+const ZONES_ON_KEY = "chart-zones-on";
+const ZONES_MIN_TOUCHES_KEY = "chart-zones-min-touches";
+const ZONE_TOUCH_OPTIONS = [2, 3, 4];
+const DEFAULT_ZONE_TOUCHES = 3;
+const ZONES_ANCHOR_KEY = "chart-zones-anchor";
+
+// Start-line candle times per symbol ({ AAPL: unixSeconds }), so the line is still
+// there the next time the symbol is opened.
+function readZoneAnchors() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ZONES_ANCHOR_KEY));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 // The last-price badge drops the "$" so it stays narrow.
 function formatAxisPrice(value) {
@@ -35,17 +54,6 @@ function clamp(value, min, max) {
 function roundPrice(value) {
   if (value < 1) return Math.round(value * 10000) / 10000;
   return Math.round(value * 100) / 100;
-}
-
-// Same formula as the backend's technical-scan EMA (pandas .ewm(span, adjust=False).mean()).
-function computeEma(candles, period) {
-  if (candles.length === 0) return [];
-  const alpha = 2 / (period + 1);
-  let prev = candles[0].close;
-  return candles.map((c, i) => {
-    prev = i === 0 ? c.close : c.close * alpha + prev * (1 - alpha);
-    return { time: c.time, value: prev };
-  });
 }
 
 function readThemeColors() {
@@ -75,13 +83,18 @@ export default function ChartScanScreen() {
   const [quoteError, setQuoteError] = useState(null);
   const [shares, setShares] = useState(1);
 
-  const [timeframe, setTimeframe] = useState("1h");
+  const [timeframe, setTimeframe] = useState(() => params?.timeframe || "1h");
+  // A scan result (e.g. Shilo) can open the chart with the level it found and the candles
+  // that touched it: { level, kind: "support" | "resistance", touchTimes }. Only drawn
+  // while that result's symbol is the one on screen.
+  const pattern = params?.pattern && params.symbol === symbol ? params.pattern : null;
   const [tfOpen, setTfOpen] = useState(false);
   const tfRef = useRef(null);
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
   const emaSeriesRef = useRef(null);
+  const markersRef = useRef(null);
   const candlesRef = useRef([]);
   const updatePriceLineYRef = useRef(() => {});
   const lastCloseRef = useRef(null);
@@ -109,6 +122,57 @@ export default function ChartScanScreen() {
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
 
+  const [zonesOn, setZonesOn] = useState(() => localStorage.getItem(ZONES_ON_KEY) === "1");
+  const [zonesMinTouches, setZonesMinTouches] = useState(() => {
+    const stored = Number(localStorage.getItem(ZONES_MIN_TOUCHES_KEY));
+    return ZONE_TOUCH_OPTIONS.includes(stored) ? stored : DEFAULT_ZONE_TOUCHES;
+  });
+  const [zonesMenuOpen, setZonesMenuOpen] = useState(false);
+  const zonesMenuRef = useRef(null);
+  const zonesRef = useRef(null);
+  // Bumped whenever candlesRef gets new data, so the zones are recomputed for it.
+  const [candlesVersion, setCandlesVersion] = useState(0);
+
+  // The start line: zones and breakout+retest are only looked for from its candle on.
+  // Kept per symbol as a candle time, so it lands on the same moment on every timeframe.
+  const [zoneAnchors, setZoneAnchors] = useState(readZoneAnchors);
+  const anchorTime = zoneAnchors[symbol] ?? null;
+  // true while waiting for the tap on the chart that places the line.
+  const [placingAnchor, setPlacingAnchor] = useState(false);
+  const [draggingAnchor, setDraggingAnchor] = useState(false);
+  // The line's x in px and the chart's width, or null while it isn't drawn.
+  const [anchorPos, setAnchorPos] = useState(null);
+
+  const setAnchorTime = useCallback(
+    (time) =>
+      setZoneAnchors((all) => {
+        const next = { ...all };
+        if (time == null) delete next[symbol];
+        else next[symbol] = time;
+        return next;
+      }),
+    [symbol]
+  );
+
+  // The first candle at or after the line; a line past the last candle stays on it.
+  const anchorIdx = useMemo(() => {
+    const candles = candlesRef.current;
+    if (anchorTime == null || !candles.length) return null;
+    const idx = candles.findIndex((c) => c.time >= anchorTime);
+    return idx === -1 ? candles.length - 1 : idx;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorTime, candlesVersion]);
+
+  const autoZones = useMemo(
+    () =>
+      zonesOn
+        ? detectZonesFrom(candlesRef.current, anchorIdx ?? 0, { minTouches: zonesMinTouches })
+        : { zones: [], events: [] },
+    // candlesVersion stands in for candlesRef.current, which a ref can't signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [zonesOn, zonesMinTouches, anchorIdx, candlesVersion]
+  );
+
   const TIMEFRAMES = [
     { value: "5m", label: t("chartScan.tf5m") },
     { value: "15m", label: t("chartScan.tf15m") },
@@ -130,6 +194,7 @@ export default function ChartScanScreen() {
 
   useEffect(() => {
     if (params?.symbol) setSymbol(params.symbol);
+    if (params?.timeframe) setTimeframe(params.timeframe);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
@@ -145,6 +210,63 @@ export default function ChartScanScreen() {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [tfOpen]);
+
+  useEffect(() => {
+    if (!zonesMenuOpen) return;
+    const onClickOutside = (e) => {
+      if (zonesMenuRef.current && !zonesMenuRef.current.contains(e.target)) setZonesMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [zonesMenuOpen]);
+
+  useEffect(() => {
+    localStorage.setItem(ZONES_ON_KEY, zonesOn ? "1" : "0");
+  }, [zonesOn]);
+
+  useEffect(() => {
+    localStorage.setItem(ZONES_MIN_TOUCHES_KEY, String(zonesMinTouches));
+  }, [zonesMinTouches]);
+
+  useEffect(() => {
+    localStorage.setItem(ZONES_ANCHOR_KEY, JSON.stringify(zoneAnchors));
+  }, [zoneAnchors]);
+
+  // While placing, a tap on the chart (panning still works) puts the line on the left
+  // edge of the tapped candle.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!placingAnchor || !chart) return;
+    const onClick = (param) => {
+      const candles = candlesRef.current;
+      if (param.logical == null || !candles.length) return;
+      setAnchorTime(candles[clamp(param.logical, 0, candles.length - 1)].time);
+      setPlacingAnchor(false);
+    };
+    chart.subscribeClick(onClick);
+    return () => chart.unsubscribeClick(onClick);
+  }, [placingAnchor, setAnchorTime]);
+
+  // Keeps the line on its candle's left edge as the chart pans and zooms.
+  useEffect(() => {
+    const timeScale = chartRef.current?.timeScale();
+    if (!timeScale || !zonesOn || anchorIdx == null) {
+      setAnchorPos(null);
+      return;
+    }
+    const update = () => {
+      const x = timeScale.logicalToCoordinate(anchorIdx);
+      const width = containerRef.current?.clientWidth;
+      setAnchorPos(x == null || !width ? null : { x: x - timeScale.options().barSpacing / 2, width });
+    };
+    update();
+    timeScale.subscribeVisibleLogicalRangeChange(update);
+    window.addEventListener("resize", update);
+    return () => {
+      timeScale.unsubscribeVisibleLogicalRangeChange(update);
+      window.removeEventListener("resize", update);
+    };
+  }, [zonesOn, anchorIdx, candlesVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,6 +330,10 @@ export default function ChartScanScreen() {
     chartRef.current = chart;
     seriesRef.current = series;
     emaSeriesRef.current = emaSeries;
+    markersRef.current = createSeriesMarkers(series, []);
+    const zones = new ZonesPrimitive();
+    series.attachPrimitive(zones);
+    zonesRef.current = zones;
 
     const onRangeChange = () => updatePriceLineYRef.current();
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange);
@@ -295,6 +421,9 @@ export default function ChartScanScreen() {
       el.removeEventListener("pointerup", onPointerEnd, { capture: true });
       el.removeEventListener("pointercancel", onPointerEnd, { capture: true });
       el.removeEventListener("pointerleave", onPointerEnd, { capture: true });
+      // Lets effects that drew on the series see it's gone (see the pattern overlay).
+      seriesRef.current = null;
+      zonesRef.current = null;
       chart.remove();
     };
   }, []);
@@ -313,6 +442,7 @@ export default function ChartScanScreen() {
           data.candles.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }))
         );
         candlesRef.current = data.candles;
+        setCandlesVersion((v) => v + 1);
         emaSeriesRef.current?.setData(computeEma(data.candles, EMA_PERIOD));
         lastCloseRef.current = data.candles.length ? data.candles[data.candles.length - 1].close : null;
         seriesRef.current?.priceScale().applyOptions({ autoScale: true, scaleMargins: DEFAULT_PRICE_MARGINS });
@@ -341,6 +471,47 @@ export default function ChartScanScreen() {
       clearTimeout(retryTimer);
     };
   }, [symbol, timeframe, candlesRetry]);
+
+  // The scan's level is a price, so it's drawn on every timeframe; the touch markers are
+  // 4h candle times, so they only line up with bars on the 4h view.
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series || !pattern || chartLoading) return;
+    const colors = readThemeColors();
+    const isSupport = pattern.kind === "support";
+    const color = isSupport ? colors.up : colors.down;
+    const line = series.createPriceLine({
+      price: pattern.level,
+      color,
+      lineWidth: 2,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: false,
+    });
+    const touchSecs = timeframe === "4h" ? pattern.touchTimes.map((iso) => Date.parse(iso) / 1000) : [];
+    markersRef.current?.setMarkers(
+      touchSecs.map((time, i) => ({
+        time,
+        position: isSupport ? "belowBar" : "aboveBar",
+        shape: isSupport ? "arrowUp" : "arrowDown",
+        color,
+        text: String(i + 1),
+      }))
+    );
+    return () => {
+      if (seriesRef.current !== series) return; // chart already torn down (unmount)
+      markersRef.current?.setMarkers([]);
+      series.removePriceLine(line);
+    };
+  }, [pattern, timeframe, chartLoading]);
+
+  useEffect(() => {
+    zonesRef.current?.setState({
+      candles: candlesRef.current,
+      zones: autoZones.zones,
+      events: autoZones.events,
+      texts: { breakout: t("zones.breakout"), retest: t("zones.retest") },
+    });
+  }, [autoZones, t]);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -396,6 +567,48 @@ export default function ChartScanScreen() {
     };
     updatePriceLineYRef.current();
   }, [holding, ownedShares, isShort, positionQty, positionProfit, t]);
+
+  // One tap draws the zones and their breakout+retest marks; another hides them.
+  const toggleZones = () => {
+    if (zonesOn) {
+      setZonesMenuOpen(false);
+      setPlacingAnchor(false);
+    }
+    setZonesOn((on) => !on);
+  };
+
+  // The start-line button: with no line, the next tap on the chart places one; with a
+  // line, it removes it (back to analysing every candle). Tapping while placing cancels.
+  const toggleAnchor = () => {
+    if (placingAnchor) setPlacingAnchor(false);
+    else if (anchorTime != null) setAnchorTime(null);
+    else setPlacingAnchor(true);
+  };
+
+  // Dragging the line sideways moves it to the candle edge nearest the pointer.
+  const moveAnchorTo = (clientX) => {
+    const timeScale = chartRef.current?.timeScale();
+    const rect = containerRef.current?.getBoundingClientRect();
+    const candles = candlesRef.current;
+    if (!timeScale || !rect || !candles.length) return;
+    // The line sits on a candle's left edge; half a bar to the right is inside that candle.
+    const x = clamp(clientX - rect.left, 0, rect.width);
+    const logical = timeScale.coordinateToLogical(x + timeScale.options().barSpacing / 2);
+    if (logical == null) return;
+    const idx = clamp(logical, 0, candles.length - 1);
+    if (idx !== anchorIdx) setAnchorTime(candles[idx].time);
+  };
+
+  const startAnchorDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDraggingAnchor(true);
+  };
+
+  const onAnchorDragMove = (e) => {
+    if (draggingAnchor) moveAnchorTo(e.clientX);
+  };
 
   const closePicker = () => {
     setPickerOpen(false);
@@ -596,6 +809,24 @@ export default function ChartScanScreen() {
         {chartLoading && !chartError && <p className="chart-loading">{t("common.loading")}</p>}
         <div className="chart-container-wrap">
           <div ref={containerRef} className="chart-container" />
+          {anchorPos && anchorPos.x > 0 && (
+            <span className="chart-anchor-shade" style={{ width: `${Math.min(anchorPos.x, anchorPos.width)}px` }} />
+          )}
+          {/* Stays mounted (pinned to the edge) while dragged, so it keeps the pointer. */}
+          {anchorPos && (draggingAnchor || (anchorPos.x >= 0 && anchorPos.x <= anchorPos.width)) && (
+            <div
+              className={`chart-anchor-line${draggingAnchor ? " is-dragging" : ""}`}
+              style={{ left: `${clamp(anchorPos.x, 0, anchorPos.width)}px` }}
+              onPointerDown={startAnchorDrag}
+              onPointerMove={onAnchorDragMove}
+              onPointerUp={() => setDraggingAnchor(false)}
+              onPointerCancel={() => setDraggingAnchor(false)}
+              onLostPointerCapture={() => setDraggingAnchor(false)}
+            >
+              <span className="chart-anchor-label">⟷ {t("zones.anchorLabel")}</span>
+            </div>
+          )}
+          {placingAnchor && <p className="chart-anchor-hint">{t("zones.anchorHint")}</p>}
           {lastPriceY != null && lastPriceX != null && lastCloseRef.current != null && (
             <span className="chart-last-price-line" style={{ top: `${lastPriceY}px`, left: `${lastPriceX}px` }} />
           )}
@@ -683,6 +914,84 @@ export default function ChartScanScreen() {
                       {tf.label}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+
+            <div className="tf-dropdown zones-controls" ref={zonesMenuRef}>
+              <button
+                type="button"
+                className={`indicators-trigger zones-trigger${zonesOn ? " is-on" : ""}`}
+                onClick={toggleZones}
+                aria-pressed={zonesOn}
+                aria-label={zonesOn ? t("zones.hide") : t("zones.show")}
+                title={zonesOn ? t("zones.hide") : t("zones.show")}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="6" rx="1" />
+                  <rect x="3" y="14" width="18" height="6" rx="1" />
+                </svg>
+              </button>
+              {zonesOn && (
+                <button
+                  type="button"
+                  className={`indicators-trigger zones-anchor-trigger${
+                    placingAnchor ? " open" : anchorTime != null ? " is-on" : ""
+                  }`}
+                  onClick={toggleAnchor}
+                  aria-pressed={placingAnchor || anchorTime != null}
+                  aria-label={t(placingAnchor ? "zones.anchorCancel" : anchorTime != null ? "zones.anchorRemove" : "zones.anchorPlace")}
+                  title={t(placingAnchor ? "zones.anchorCancel" : anchorTime != null ? "zones.anchorRemove" : "zones.anchorPlace")}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 3v18" />
+                    <path d="M6 4h12l-3 3.5 3 3.5H6" />
+                  </svg>
+                </button>
+              )}
+              {zonesOn && (
+                <button
+                  type="button"
+                  className={`indicators-trigger zones-settings-trigger${zonesMenuOpen ? " open" : ""}`}
+                  onClick={() => setZonesMenuOpen((open) => !open)}
+                  aria-label={t("zones.settings")}
+                  aria-expanded={zonesMenuOpen}
+                  title={t("zones.settings")}
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="5" r="2.2" />
+                    <circle cx="12" cy="12" r="2.2" />
+                    <circle cx="12" cy="19" r="2.2" />
+                  </svg>
+                </button>
+              )}
+              {zonesMenuOpen && (
+                <div className="tf-dropdown-menu zones-menu">
+                  <div className="zones-menu-row">
+                    <span>{t("zones.minTouches")}</span>
+                    <div className="zones-touch-options">
+                      {ZONE_TOUCH_OPTIONS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={zonesMinTouches === n ? "active" : ""}
+                          onClick={() => setZonesMinTouches(n)}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="zones-legend">
+                    <span>
+                      <i className="zones-swatch is-zone" />
+                      {t("zones.legendZone")}
+                    </span>
+                    <span>
+                      <i className="zones-swatch is-break" />
+                      {t("zones.legendBreakRetest")}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

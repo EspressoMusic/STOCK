@@ -84,6 +84,14 @@ const TripleTouchPanel = forwardRef(function TripleTouchPanel({ market, onBusyCh
         <StockDetailModal
           key={selected.symbol}
           stock={{ symbol: selected.symbol, name: selected.name, price: selected.price }}
+          chartParams={{
+            timeframe: "4h",
+            pattern: {
+              level: selected.level,
+              kind: selected.direction === "long" ? "support" : "resistance",
+              touchTimes: selected.touch_times,
+            },
+          }}
           onClose={() => setSelected(null)}
         />
       )}

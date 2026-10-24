@@ -15,22 +15,25 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import init_db, get_db
-from .models import Scan
+from .models import Scan, ZoneTrainingChart
 from .scanner import VALID_SECTORS, MarketDataUnavailable, scan_crypto, scan_by_cap
 from .schemas import (
     ScanOut, ScanSummaryOut, RunScanRequest, TechnicalScanOut, CandlesOut,
     EmaBreakoutScanOut, EmaTouch4hScanOut, EmaDoubleTouchForexScanOut, PatternScanOut, TripleTouchScanOut,
+    StochExtremeScanOut,
     QuoteOut, StockProfileOut, MarketCandidateOut, CryptoScanOut, CapScanOut, ChartAnalysisOut,
     ChatReplyOut, NewsDigestIn, NewsDigestOut, NewsItemOut, WorldNewsOut,
     SymbolSearchOut, SymbolMatchOut, BillingStatusOut,
     DailyDigestIn, DailyDigestOut,
     GoogleAuthIn, AuthResultOut, UserOut,
+    ZoneTrainingIn, ZoneTrainingOut,
+    RetestAlertScanOut, ZoneTouchScanOut,
 )
 from .pipeline import run_scan
 from .scheduler import start_scheduler, next_run_times
 from .technical_scan import (
     scan_technical_signals, DEFAULT_TIMEFRAME, scan_ema50_breakout, scan_ema50_touch_4h,
-    scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_1h,
+    scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_4h, scan_stoch_extreme_daily_4h,
 )
 from .candles import get_candles, DEFAULT_CANDLE_TIMEFRAME
 from .quote import get_quote, search_symbols
@@ -41,6 +44,8 @@ from .ai_summary import (
     generate_outlook, generate_company_blurb,
 )
 from .enrichment import enrich_symbol
+from .retest_alerts import run_retest_alerts, get_last_result as get_last_retest_alerts
+from .zone_touch_scan import run_zone_touch_scan, get_last_result as get_last_zone_touch_scan
 from .world_news import get_world_news
 from . import license as license_module
 from . import paddle as paddle_module
@@ -91,6 +96,9 @@ _stock_profile_cache_lock = threading.Lock()
 # One lock per market so a slow stock scan doesn't hold up a quick forex/crypto one.
 _triple_touch_scan_locks = {m: threading.Lock() for m in ("stocks", "forex", "crypto")}
 _last_triple_touch_scan: dict[str, TripleTouchScanOut] = {}
+
+_stoch_extreme_scan_lock = threading.Lock()
+_last_stoch_extreme_scan: Optional[StochExtremeScanOut] = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -369,7 +377,7 @@ def trigger_triple_touch_scan(market: str = Query("stocks", pattern="^(stocks|fo
     # On-demand only, serialized per market: a second click while a scan is already
     # running waits for it rather than hammering Yahoo with two at once.
     with _triple_touch_scan_locks[market]:
-        result = scan_triple_touch_1h(market)
+        result = scan_triple_touch_4h(market)
         out = TripleTouchScanOut(
             market=result.market,
             scanned_at=result.scanned_at,
@@ -378,6 +386,57 @@ def trigger_triple_touch_scan(market: str = Query("stocks", pattern="^(stocks|fo
         )
         _last_triple_touch_scan[market] = out
         return out
+
+
+@app.get("/api/stoch-extreme-scan/latest", response_model=StochExtremeScanOut)
+def latest_stoch_extreme_scan():
+    if _last_stoch_extreme_scan is None:
+        raise HTTPException(status_code=404, detail="עדיין לא הרצת סריקת שילה 2. לחץ על 'סרוק עכשיו' כדי להתחיל.")
+    return _last_stoch_extreme_scan
+
+
+@app.post("/api/stoch-extreme-scan/run", response_model=StochExtremeScanOut)
+def trigger_stoch_extreme_scan():
+    global _last_stoch_extreme_scan
+    # On-demand only, single-flight: a second click while a scan is already running
+    # waits for it to finish and reuses its result rather than starting a duplicate.
+    with _stoch_extreme_scan_lock:
+        result = scan_stoch_extreme_daily_4h()
+        out = StochExtremeScanOut(
+            scanned_at=result.scanned_at,
+            universe_stock_count=result.universe_stock_count,
+            stocks=result.stocks,
+        )
+        _last_stoch_extreme_scan = out
+        return out
+
+
+@app.get("/api/retest-alerts/latest", response_model=RetestAlertScanOut)
+def latest_retest_alerts():
+    result = get_last_retest_alerts()
+    if result is None:
+        raise HTTPException(status_code=404, detail="סריקת הפריצה + 3 ריטסטים עדיין לא רצה מאז שהשרת עלה.")
+    return result
+
+
+@app.post("/api/retest-alerts/run", response_model=RetestAlertScanOut)
+def trigger_retest_alerts(db: Session = Depends(get_db)):
+    # Also runs daily after the close (scheduler.py). Sends only setups not alerted before.
+    return run_retest_alerts(db)
+
+
+@app.get("/api/zone-touch-scan/latest", response_model=ZoneTouchScanOut)
+def latest_zone_touch_scan():
+    result = get_last_zone_touch_scan()
+    if result is None:
+        raise HTTPException(status_code=404, detail="סריקת 3 נגיעות באזור עדיין לא רצה מאז שהשרת עלה.")
+    return result
+
+
+@app.post("/api/zone-touch-scan/run", response_model=ZoneTouchScanOut)
+def trigger_zone_touch_scan():
+    # The trainer's "סרוק" — no Telegram; the daily run (scheduler.py) sends the list.
+    return run_zone_touch_scan()
 
 
 @app.get("/api/candles", response_model=CandlesOut)
@@ -389,6 +448,59 @@ def candles(
     if not data:
         raise HTTPException(status_code=404, detail="לא נמצאו נתוני נרות עבור המניה הזו.")
     return CandlesOut(symbol=symbol.upper(), timeframe=timeframe, candles=data)
+
+
+# The zone trainer (frontend/trainer.html, desktop only, not part of the app): charts
+# the user reviewed, kept as training data for the zone detector. The list endpoint
+# returns every chart in full (candles included) — it doubles as the export used when
+# tuning frontend/src/lib/zones.js.
+def _zone_training_out(row: ZoneTrainingChart) -> ZoneTrainingOut:
+    return ZoneTrainingOut(
+        id=row.id,
+        symbol=row.symbol,
+        timeframe=row.timeframe,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        **json.loads(row.payload_json),
+    )
+
+
+def _zone_training_payload(req: ZoneTrainingIn) -> str:
+    return json.dumps(req.model_dump(exclude={"symbol", "timeframe"}))
+
+
+@app.get("/api/zone-training", response_model=list[ZoneTrainingOut])
+def list_zone_training(db: Session = Depends(get_db)):
+    rows = db.query(ZoneTrainingChart).order_by(desc(ZoneTrainingChart.updated_at)).all()
+    return [_zone_training_out(r) for r in rows]
+
+
+@app.post("/api/zone-training", response_model=ZoneTrainingOut)
+def create_zone_training(req: ZoneTrainingIn, db: Session = Depends(get_db)):
+    row = ZoneTrainingChart(symbol=req.symbol.upper(), timeframe=req.timeframe, payload_json=_zone_training_payload(req))
+    db.add(row)
+    db.commit()
+    return _zone_training_out(row)
+
+
+@app.put("/api/zone-training/{chart_id}", response_model=ZoneTrainingOut)
+def update_zone_training(chart_id: int, req: ZoneTrainingIn, db: Session = Depends(get_db)):
+    row = db.get(ZoneTrainingChart, chart_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Training chart not found")
+    row.payload_json = _zone_training_payload(req)
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return _zone_training_out(row)
+
+
+@app.delete("/api/zone-training/{chart_id}")
+def delete_zone_training(chart_id: int, db: Session = Depends(get_db)):
+    row = db.get(ZoneTrainingChart, chart_id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
 
 
 @app.post("/api/scans/run", response_model=ScanOut)

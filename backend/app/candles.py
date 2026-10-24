@@ -67,10 +67,11 @@ def _to_candles(df: pd.DataFrame) -> list[Candle]:
     return out
 
 
-def get_4h_dataframe(symbol: str) -> Optional[pd.DataFrame]:
+def get_4h_dataframe(symbol: str, period: Optional[str] = None) -> Optional[pd.DataFrame]:
     """Raw 4h OHLCV dataframe, built from 1h bars. Exposed separately from
     get_candles() so indicator scans (e.g. EMA50 touch) can work off the same
-    bars without going through the Candle conversion.
+    bars without going through the Candle conversion. `period` overrides how
+    far back the 1h bars go, for scans that don't need the chart's full 2y.
 
     Grouped sequentially within each trading day (first 4 hourly bars, then
     whatever remains) rather than resampled on calendar time. Yahoo only
@@ -78,9 +79,9 @@ def get_4h_dataframe(symbol: str) -> Optional[pd.DataFrame]:
     equities), so a midnight-aligned "4h" bucket splits that session at
     arbitrary points instead of real 4-hour groups — this instead matches how
     charting platforms build 4h candles from an exchange's session."""
-    interval, period = _FETCH_PARAMS["4h"]
+    interval, default_period = _FETCH_PARAMS["4h"]
     try:
-        df = yf.Ticker(symbol).history(interval=interval, period=period)
+        df = yf.Ticker(symbol).history(interval=interval, period=period or default_period)
     except Exception:
         logger.warning("4h candle fetch failed for %s", symbol)
         return None
@@ -89,21 +90,24 @@ def get_4h_dataframe(symbol: str) -> Optional[pd.DataFrame]:
         return None
 
     day = df.index.date
-    bar_in_day = pd.Series(range(len(df)), index=df.index).groupby(day).cumcount()
+    bar_in_day = pd.Series(range(len(df)), index=df.index).groupby(day).cumcount().to_numpy()
     chunk_idx = bar_in_day // 4
 
-    rows = []
-    for _, chunk in df.groupby([day, chunk_idx], sort=False):
-        rows.append({
-            "_time": chunk.index[0],
-            "Open": chunk["Open"].iloc[0],
-            "High": chunk["High"].max(),
-            "Low": chunk["Low"].min(),
-            "Close": chunk["Close"].iloc[-1],
-            "Volume": chunk["Volume"].sum(),
-        })
-
-    out = pd.DataFrame(rows).set_index("_time")
+    # One vectorized aggregation rather than a Python loop over the groups — the scans
+    # build this for thousands of symbols, and the loop cost ~8x the download itself.
+    out = (
+        df.assign(_time=df.index)
+        .groupby([day, chunk_idx], sort=False)
+        .agg(
+            _time=("_time", "first"),
+            Open=("Open", "first"),
+            High=("High", "max"),
+            Low=("Low", "min"),
+            Close=("Close", "last"),
+            Volume=("Volume", "sum"),
+        )
+        .set_index("_time")
+    )
     out.index.name = df.index.name
     return out.dropna(subset=["Open", "High", "Low", "Close"])
 

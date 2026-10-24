@@ -49,8 +49,31 @@ class Settings(BaseSettings):
     technical_ema_period: int = 50
     technical_stock_universe_size: int = 250
     technical_scan_workers: int = 12
-    # The triple-touch (repeated rejection) scan casts a wider net than the other scans.
-    triple_touch_stock_universe_size: int = 500
+    # The triple-touch (repeated rejection) scan casts a much wider net than the other
+    # scans: the top 1000 Nasdaq stocks by volume, which takes in plenty of small caps
+    # (~half) and broken penny stocks (~1 in 6). The whole ~2300 traded names would take
+    # ~8 minutes at the pace Yahoo tolerates; 1000 takes ~3.5.
+    triple_touch_stock_universe_size: int = 1000
+    triple_touch_min_stock_volume: int = 50_000
+    # "Shilo 2" (Stoch RSI extreme on daily + 4h) costs one request per stock plus a second
+    # for the ~2/3 stretched on the daily chart, so 500 stocks take ~2.5-3 minutes at the
+    # paced rate (1000 would take ~5.5).
+    stoch_extreme_stock_universe_size: int = 500
+    stoch_extreme_min_stock_volume: int = 50_000
+
+    # Telegram alerts: breakout + 3 retests on the daily chart (app/retest_alerts.py).
+    # Token from @BotFather; chat id via `python -m app.telegram`. Either blank = no alerts.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    retest_alert_time: str = "16:30"  # Mon-Fri, scan_timezone — after the US close
+    retest_alert_stock_universe_size: int = 1000
+    retest_alert_min_stock_volume: int = 50_000
+    # Stocks still inside a 3-touch 4h zone (app/zone_touch_scan.py), one Telegram list a day.
+    zone_touch_alert_time: str = "16:45"  # Mon-Fri, scan_timezone — after the retest alerts
+    # The scanner page the alerts link to, which opens the alert's chart with its marking
+    # (frontend AlertChartModal). The live site, so the link opens on the phone too; for the
+    # local one use 127.0.0.1, not localhost: Telegram silently drops links to "localhost".
+    alert_chart_url: str = "https://stock-one-flax.vercel.app/"
 
     # Storage
     database_url: str = "sqlite:///./stockbot.db"

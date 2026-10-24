@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import AlertChartModal from "./components/AlertChartModal";
 import BottomNav from "./components/BottomNav";
 import WelcomeGate from "./components/WelcomeGate";
 import PortfolioScreen from "./screens/PortfolioScreen";
@@ -12,6 +13,7 @@ import useReminders from "./hooks/useReminders";
 import useAccessibility from "./hooks/useAccessibility";
 import useAuth from "./hooks/useAuth";
 import { CENTER_TAB } from "./features";
+import { clearAlertFromUrl, readAlert } from "./lib/alertLink";
 
 function AppShell({ auth }) {
   const { tab, goTo } = useNav();
@@ -22,6 +24,12 @@ function AppShell({ auth }) {
   const [skin, setSkin] = useState("default");
   const reminders = useReminders(t);
   const a11y = useAccessibility();
+  // Opened from a Telegram alert's link: its chart with the marking, over the app.
+  const [alert, setAlert] = useState(readAlert);
+  const closeAlert = useCallback(() => {
+    setAlert(null);
+    clearAlertFromUrl();
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -69,6 +77,8 @@ function AppShell({ auth }) {
       </div>
 
       <BottomNav />
+
+      {alert && <AlertChartModal alert={alert} onClose={closeAlert} />}
     </div>
   );
 }

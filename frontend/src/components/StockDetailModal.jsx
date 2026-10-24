@@ -39,7 +39,9 @@ function withoutNulls(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, v]) => v != null));
 }
 
-export default function StockDetailModal({ stock: baseStock, direction: baseDirection, onClose }) {
+// chartParams (optional) rides along to the chart screen when its button is pressed —
+// e.g. a scan result's timeframe and the level/touches it found.
+export default function StockDetailModal({ stock: baseStock, direction: baseDirection, chartParams, onClose }) {
   const { t, lang } = useLang();
   const { goTo } = useNav();
   const { isSaved, toggle } = useWatchlist();
@@ -150,7 +152,7 @@ export default function StockDetailModal({ stock: baseStock, direction: baseDire
             <button
               className="stock-detail-chart-icon-btn"
               onClick={() => {
-                goTo("chart-scan", { symbol: stock.symbol });
+                goTo("chart-scan", { symbol: stock.symbol, ...chartParams });
                 onClose();
               }}
               aria-label={t("common.showChart")}

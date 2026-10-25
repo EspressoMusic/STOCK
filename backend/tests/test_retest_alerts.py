@@ -11,93 +11,76 @@ from app.models import SentAlert
 from app.retest_alerts import RetestSetup, find_retests, find_setup, run_retest_alerts
 from app.zones import Breakout, Zone
 
-# Zone 100-102, one typical candle = 2: price has "left" above 104, a retest reaches
-# 102.5 and closes above 101, and a close under 99.8 fails the breakout.
+# Zone 100-102, one typical candle = 2: after a breakdown, a touch reaches 99.5 and
+# closes under 101, and a close over 102.2 fails the breakdown.
 ZONE = Zone(id="z", bottom=100, top=102, unit=2, start_idx=0, touch_idx=[])
-UP = Breakout(idx=0, dir="up")
+DOWN = Breakout(idx=0, dir="down")
 
 
 def bars(*rows):
-    return [Candle(time=i * 86400, open=close, high=high, low=low, close=close) for i, (low, high, close) in enumerate(rows)]
+    return [Candle(time=i * 3600, open=close, high=high, low=low, close=close) for i, (low, high, close) in enumerate(rows)]
 
 
-THREE_RETESTS = [
-    (99, 103.5, 103),  # 0 breakout
-    (103, 106, 105),  # left
-    (102, 105, 103.5),  # 2 retest
-    (102.2, 104, 103),  # still sitting on the zone: same retest, not a new one
-    (103, 107, 106),  # left
-    (101.5, 106, 104),  # 5 retest
-    (104, 108, 107),  # left
-    (102.4, 107, 105),  # 7 retest
+# Price hangs right under the broken zone and pokes it three times (the user's GBP/CHF
+# example on the 1h chart).
+THREE_TOUCHES = [
+    (98, 103, 98.5),  # 0 breakdown
+    (98, 99.6, 99),  # reaches the zone, but the next candle goes higher
+    (98.5, 99.8, 99.2),  # 2 touch
+    (98.2, 99.4, 98.6),
+    (97.8, 99, 98.4),
+    (98, 100.3, 99),  # 5 touch, into the zone and back out
+    (98.3, 99.5, 98.8),  # still at the zone, but lower than the touch before it
+    (97.9, 99.1, 98.5),
+    (98.2, 99.9, 99.1),  # 8 touch
+    (98, 99.3, 98.7),
 ]
 
 
-def test_counts_each_pullback_once():
-    assert find_retests(bars(*THREE_RETESTS), ZONE, UP) == [2, 5, 7]
+def test_each_poke_at_the_zone_is_one_touch():
+    assert find_retests(bars(*THREE_TOUCHES), ZONE, DOWN) == [2, 5, 8]
 
 
 def test_close_back_through_the_zone_fails_the_breakout():
-    assert find_retests(bars(*THREE_RETESTS, (98, 104, 99)), ZONE, UP) == []
+    assert find_retests(bars(*THREE_TOUCHES, (99, 103, 102.5)), ZONE, DOWN) == []
 
 
-def test_dip_that_closes_below_the_middle_is_not_a_retest():
-    rows = THREE_RETESTS[:5] + [(100.2, 104, 100.8)]
-    assert find_retests(bars(*rows), ZONE, UP) == [2]
+def test_poke_that_closes_above_the_middle_is_not_a_touch():
+    rows = THREE_TOUCHES[:5] + [(98, 101.5, 101.2)] + THREE_TOUCHES[6:]
+    assert find_retests(bars(*rows), ZONE, DOWN) == [2, 8]
 
 
-def test_retest_long_after_the_previous_one_does_not_count():
-    rows = THREE_RETESTS[:5] + [(104, 108, 107)] * 30 + [(101.5, 106, 104)]
-    assert find_retests(bars(*rows), ZONE, UP) == [2]
+def test_last_candle_counts_before_later_candles_confirm_it():
+    assert find_retests(bars(*THREE_TOUCHES[:9]), ZONE, DOWN) == [2, 5, 8]
+    # ...and a higher poke right after it takes its place.
+    assert find_retests(bars(*THREE_TOUCHES, (98.1, 100, 99.2)), ZONE, DOWN) == [2, 5, 10]
 
 
-def test_breakdown_mirrors_breakout():
-    flipped = [(-high + 202, -low + 202, -close + 202) for low, high, close in THREE_RETESTS]
-    assert find_retests(bars(*flipped), ZONE, Breakout(idx=0, dir="down")) == [2, 5, 7]
+def test_touch_long_after_the_previous_one_does_not_count():
+    rows = THREE_TOUCHES[:8] + [(97, 98, 97.5)] * 30 + [(98.2, 99.9, 99.1)]
+    assert find_retests(bars(*rows), ZONE, DOWN) == [2, 5]
 
 
-QUICK_RETEST = [
-    (99, 103, 102.5),  # 0 breakout, barely clear of the zone
-    (101.8, 103, 102.6),  # still on the zone
-    (101.5, 103, 102.4),  # 2 pulls back below the last low into the zone, holds above 101
-]
-
-
-def test_quick_retest_before_price_got_clear():
-    rows = QUICK_RETEST + [(102.5, 105, 104.5), (102, 105, 103.5)]  # then clear above 104, retest again
-    assert find_retests(bars(*rows), ZONE, UP) == [2, 4]
-
-
-def test_quick_retest_needs_price_to_get_clear_after():
-    rows = QUICK_RETEST + [(102.5, 104, 103.5)] * 5  # past the retest's high, never above 104
-    assert find_retests(bars(*rows), ZONE, UP) == []
-
-
-def test_candle_right_after_the_breakout_is_not_a_quick_retest():
-    rows = [(99, 103, 102.5), (101.5, 103, 102.4), (102.5, 105, 104.5)]
-    assert find_retests(bars(*rows), ZONE, UP) == []
-
-
-def test_quick_breakdown_retest_mirrors_breakout():
-    rows = QUICK_RETEST + [(102.5, 105, 104.5), (102, 105, 103.5)]
-    flipped = [(-high + 202, -low + 202, -close + 202) for low, high, close in rows]
-    assert find_retests(bars(*flipped), ZONE, Breakout(idx=0, dir="down")) == [2, 4]
+def test_breakout_up_mirrors_breakdown():
+    flipped = [(-high + 202, -low + 202, -close + 202) for low, high, close in THREE_TOUCHES]
+    assert find_retests(bars(*flipped), ZONE, Breakout(idx=0, dir="up")) == [2, 5, 8]
 
 
 @pytest.fixture
 def one_zone(monkeypatch):
     monkeypatch.setattr(retest_alerts, "detect_zones", lambda candles, **_: [ZONE])
-    monkeypatch.setattr(retest_alerts, "find_breakouts", lambda candles, zone: [UP])
+    monkeypatch.setattr(retest_alerts, "find_breakouts", lambda candles, zone: [DOWN])
 
 
-def test_alerts_on_the_third_retest_while_it_is_fresh(one_zone):
-    assert find_setup(bars(*THREE_RETESTS))[2] == [2, 5, 7]
-    assert find_setup(bars(*THREE_RETESTS, *[(104, 108, 107)] * 3)) is not None
-    assert find_setup(bars(*THREE_RETESTS, *[(104, 108, 107)] * 4)) is None
+def test_alerts_on_the_third_touch_while_it_is_fresh(one_zone):
+    quiet = (98, 99, 98.5)
+    assert find_setup(bars(*THREE_TOUCHES))[2] == [2, 5, 8]
+    assert find_setup(bars(*THREE_TOUCHES, *[quiet] * 7)) is not None
+    assert find_setup(bars(*THREE_TOUCHES, *[quiet] * 8)) is None
 
 
-def test_two_retests_are_not_enough(one_zone):
-    assert find_setup(bars(*THREE_RETESTS[:6])) is None
+def test_two_touches_are_not_enough(one_zone):
+    assert find_setup(bars(*THREE_TOUCHES[:8])) is None
 
 
 def setup(symbol):
@@ -142,8 +125,16 @@ def test_failed_send_is_retried_next_run(monkeypatch, db):
 def test_message_links_to_the_scanner_with_the_marking():
     text = retest_alerts.format_message(setup("AAA"))
     assert "https://www.tradingview.com/chart/?symbol=AAA" in text
-    day = 1792468800  # 2026-10-20T04:00:00Z
+    hour = 1792468800  # 2026-10-20T04:00:00Z
     assert (
-        f"?symbol=AAA&amp;tf=1d&amp;zone=1,2&amp;from=1785556800&amp;dir=up"
-        f"&amp;breakout=1790827200&amp;retests={day},{day},{day}"
+        f"?symbol=AAA&amp;tf=1h&amp;zone=1,2&amp;from=1785556800&amp;dir=up"
+        f"&amp;breakout=1790827200&amp;retests={hour},{hour},{hour}"
     ) in text
+
+
+def test_forex_pair_shows_its_name_and_opens_on_tradingview():
+    s = setup("GBPCHF=X")
+    s.name = "GBP/CHF"
+    text = retest_alerts.format_message(s)
+    assert "<b>GBP/CHF</b>" in text
+    assert 'href="https://www.tradingview.com/chart/?symbol=GBPCHF"' in text

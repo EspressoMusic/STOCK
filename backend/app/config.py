@@ -61,15 +61,15 @@ class Settings(BaseSettings):
     stoch_extreme_stock_universe_size: int = 500
     stoch_extreme_min_stock_volume: int = 50_000
 
-    # Telegram alerts: breakout + 3 retests on the daily chart (app/retest_alerts.py).
+    # Telegram alerts, forex pairs only for now: breakout + 3 touches on the 1h chart
+    # (app/retest_alerts.py), checked every 4 hours on the 4h candle closes.
     # Token from @BotFather; chat id via `python -m app.telegram`. Either blank = no alerts.
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    retest_alert_time: str = "16:30"  # Mon-Fri, scan_timezone — after the US close
-    retest_alert_stock_universe_size: int = 1000
-    retest_alert_min_stock_volume: int = 50_000
-    # Stocks still inside a 3-touch 4h zone (app/zone_touch_scan.py), one Telegram list a day.
-    zone_touch_alert_time: str = "16:45"  # Mon-Fri, scan_timezone — after the retest alerts
+    # Pairs still inside a 3-touch 4h zone (app/zone_touch_scan.py), one Telegram list a day.
+    zone_touch_alert_time: str = "16:45"  # Mon-Fri, scan_timezone — after the US close
+    # Candle times in the alert messages.
+    alert_timezone: str = "Asia/Jerusalem"
     # The scanner page the alerts link to, which opens the alert's chart with its marking
     # (frontend AlertChartModal). The live site, so the link opens on the phone too; for the
     # local one use 127.0.0.1, not localhost: Telegram silently drops links to "localhost".

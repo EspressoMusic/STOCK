@@ -421,7 +421,7 @@ def latest_retest_alerts():
 
 @app.post("/api/retest-alerts/run", response_model=RetestAlertScanOut)
 def trigger_retest_alerts(db: Session = Depends(get_db)):
-    # Also runs daily after the close (scheduler.py). Sends only setups not alerted before.
+    # Also runs every 4 hours (scheduler.py). Sends only setups not alerted before.
     return run_retest_alerts(db)
 
 

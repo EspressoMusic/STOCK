@@ -102,7 +102,8 @@ const SCAN_CATEGORIES = [
     }),
   },
   {
-    // 4h chart: a zone price turned at 3+ times, and the last candle closed inside it.
+    // Forex pairs on the 4h chart: a zone price turned at 3+ times, and the last candle
+    // closed inside it.
     id: "zone-touch",
     label: "3 נגיעות",
     autoRun: true,
@@ -114,7 +115,7 @@ const SCAN_CATEGORIES = [
         symbol: c.symbol,
         badge: `באזור ×${c.touch_count}`,
         tone: "broken",
-        price: formatStockPrice(c.price),
+        price: String(c.price), // a rate like 1.09825, as the backend rounds it
         hot: false,
       })),
     }),

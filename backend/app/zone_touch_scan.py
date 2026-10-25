@@ -1,10 +1,11 @@
-"""Stocks whose 4h chart has a zone price turned at three or more times, with the last
-candle closing inside that zone — price is still sitting on it, not already gone.
+"""Forex pairs whose 4h chart has a zone price turned at three or more times, with the
+last candle closing inside that zone — price is still sitting on it, not already gone.
 
 Zones are the chart's own (zones.py, what the trainer's automatic marking draws), so a
-stock in the list shows the same zone when opened on the 4h chart. Listed in the
+pair in the list shows the same zone when opened on the 4h chart. Listed in the
 trainer's scanner ("3 נגיעות") on demand, and sent to Telegram as one list once a day
-after the US close (scheduler.py)."""
+after the US close (scheduler.py). Stocks were scanned too until the user narrowed the
+alerts to forex (October 2026)."""
 import html
 import logging
 import threading
@@ -18,27 +19,23 @@ from zoneinfo import ZoneInfo
 from . import telegram
 from .candles import Candle, _to_candles, get_4h_dataframe
 from .config import settings
-from .technical_scan import _get_stock_universe, _round_sig, _stock_fetch_limiter
-from .zones import RETEST_REACH, Zone, detect_zones, typical_candle
+from .technical_scan import FOREX_PAIRS, TRIPLE_TOUCH_EXTRA_FOREX, _round_sig
+from .zones import RETEST_REACH, Zone, detect_zones
 
 logger = logging.getLogger(__name__)
 
-HISTORY_PERIOD = "6mo"  # 1h bars → ~250 four-hour candles of a stock (2 a session)
-# Zones come from the last this-many 4h candles (~10 weeks of a stock), so every touch
-# is recent — not a level price last turned at a year ago.
+UNIVERSE = FOREX_PAIRS + TRIPLE_TOUCH_EXTRA_FOREX
+HISTORY_PERIOD = "2mo"  # 1h bars → ~250 four-hour candles of a pair (6 a day)
+# Zones come from the last this-many 4h candles (~3 weeks of a pair), so every touch is
+# recent — not a level price last turned months ago.
 WINDOW_BARS = 100
 MIN_TOUCHES = 3
 # The last close may be this many typical candles past the zone's edge and still count
 # as "in" it — zones are thin, and a close a hair outside is still sitting on the level.
 IN_ZONE_REACH = RETEST_REACH
-# A stock whose typical 4h candle is smaller than this share of its price barely moves
-# (a pending buyout, a SPAC at its trust value) and sits "in" a many-touch zone every
-# day. Stricter than "שילה"'s 0.4%: those stocks came in at 0.42-0.47%, while a quiet
-# big cap like KO is ~0.85%.
-MIN_CANDLE_PCT = 0.006
 # Telegram gets only the top of the list (most touches first) — the user asked for 10
-# while judging whether the scan is any good; the full ~130 a day was too much.
-MAX_ALERT_STOCKS = 10
+# while judging whether the scan is any good; the full ~130 stocks a day was too much.
+MAX_ALERT_PAIRS = 10
 # Telegram caps a message at 4096 characters; the list is split below that.
 MAX_MESSAGE_CHARS = 3800
 SEND_INTERVAL_SECONDS = 1.1
@@ -87,14 +84,11 @@ def _iso(ts: int) -> str:
 
 
 def _evaluate(symbol: str, name: Optional[str]) -> Optional[ZoneTouchSetup]:
-    _stock_fetch_limiter.wait()
     df = get_4h_dataframe(symbol, period=HISTORY_PERIOD)
     if df is None or df.empty:
         return None
     candles = _to_candles(df)[-WINDOW_BARS:]
     if len(candles) < WINDOW_BARS // 2:
-        return None
-    if typical_candle(candles) < MIN_CANDLE_PCT:
         return None
 
     zone = find_zone(candles)
@@ -114,14 +108,9 @@ def _evaluate(symbol: str, name: Optional[str]) -> Optional[ZoneTouchSetup]:
 
 
 def scan_zone_touches() -> ZoneTouchScanResult:
-    universe = _get_stock_universe(
-        settings.triple_touch_stock_universe_size, min_volume=settings.triple_touch_min_stock_volume
-    )
-    if not universe:
-        logger.warning("Zone touch scan: empty stock universe (screener unavailable?)")
     results: list[ZoneTouchSetup] = []
     with ThreadPoolExecutor(max_workers=settings.technical_scan_workers) as pool:
-        futures = [pool.submit(_evaluate, sym, name) for sym, name in universe]
+        futures = [pool.submit(_evaluate, sym, name) for sym, name in UNIVERSE]
         for fut in as_completed(futures):
             result = fut.result()
             if result is not None:
@@ -129,22 +118,18 @@ def scan_zone_touches() -> ZoneTouchScanResult:
     results.sort(key=lambda s: (-s.touch_count, s.distance_pct))
     return ZoneTouchScanResult(
         scanned_at=datetime.now(timezone.utc).isoformat(),
-        universe_count=len(universe),
+        universe_count=len(UNIVERSE),
         results=results,
     )
 
 
-def _price(v: float) -> str:
-    return f"{v:,.2f}" if v >= 1 else f"{v:.4f}"
-
-
 def format_messages(result: ZoneTouchScanResult) -> list[str]:
-    day = datetime.fromisoformat(result.scanned_at).astimezone(ZoneInfo(settings.scan_timezone)).strftime("%d/%m/%y")
+    day = datetime.fromisoformat(result.scanned_at).astimezone(ZoneInfo(settings.alert_timezone)).strftime("%d/%m/%y")
     head = f"📍 <b>3+ נגיעות באזור · 4 שעות</b> · {day}"
     if not result.results:
-        return [f"{head}\nאין היום מניות שהמחיר שלהן עדיין בתוך אזור כזה."]
-    shown = result.results[:MAX_ALERT_STOCKS]
-    count = f"{len(result.results)} מניות — המחיר עדיין בתוך האזור"
+        return [f"{head}\nאין היום צמדים שהמחיר שלהם עדיין בתוך אזור כזה."]
+    shown = result.results[:MAX_ALERT_PAIRS]
+    count = f"{len(result.results)} צמדים — המחיר עדיין בתוך האזור"
     if len(shown) < len(result.results):
         count += f". {len(shown)} עם הכי הרבה נגיעות"
     lines = [f"{head}\n{count}:"]
@@ -153,8 +138,8 @@ def format_messages(result: ZoneTouchScanResult) -> list[str]:
             s.symbol, "4h", s.zone_bottom, s.zone_top, s.touch_times[0], touches=s.touch_times
         )
         lines.append(
-            f"<b>{html.escape(s.symbol)}</b> {_price(s.price)}"
-            f" · אזור {_price(s.zone_bottom)}–{_price(s.zone_top)} · ×{s.touch_count}\n"
+            f"<b>{html.escape(s.name or s.symbol)}</b> {telegram.price(s.price)}"
+            f" · אזור {telegram.price(s.zone_bottom)}–{telegram.price(s.zone_top)} · ×{s.touch_count}\n"
             f"{telegram.link(telegram.tradingview_url(s.symbol), 'TradingView')}"
             f" · {telegram.link(chart, 'בסורק עם הסימון')}"
         )
@@ -185,6 +170,6 @@ def run_zone_touch_scan(send: bool = False) -> ZoneTouchScanResult:
                 result.sent = ok
             else:
                 logger.info("Zone touch scan: Telegram not configured, list not sent")
-        logger.info("Zone touch scan: %d stocks in a 3-touch 4h zone out of %d", len(result.results), result.universe_count)
+        logger.info("Zone touch scan: %d pairs in a 3-touch 4h zone out of %d", len(result.results), result.universe_count)
         _last_result = result
         return result

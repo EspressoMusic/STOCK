@@ -34,7 +34,7 @@ def _broken_job():
 
 
 def _retest_alerts_job():
-    logger.info("Running scheduled breakout + retest alert scan")
+    logger.info("Running scheduled breakout + 3 touches (1h) alert scan")
     db = SessionLocal()
     try:
         run_retest_alerts(db)
@@ -68,10 +68,12 @@ def start_scheduler():
     )
 
     if telegram.is_configured():
-        hour, minute = (int(x) for x in settings.retest_alert_time.split(":"))
+        # Every 4 hours, a few minutes after each 4h candle closes. Yahoo's forex bars run on
+        # London time, so the chart's 4h candles start at 00, 04, 08... there; the week's
+        # last candle (Friday night) is picked up by Monday's first run.
         scheduler.add_job(
             _retest_alerts_job,
-            trigger=CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=settings.scan_timezone),
+            trigger=CronTrigger(day_of_week="mon-fri", hour="0,4,8,12,16,20", minute=5, timezone="Europe/London"),
             id="retest_alerts",
             replace_existing=True,
             misfire_grace_time=3600,

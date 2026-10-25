@@ -72,7 +72,13 @@ def send_message(text: str, chat_id: Optional[str] = None) -> bool:
 
 
 def tradingview_url(symbol: str) -> str:
-    return f"https://www.tradingview.com/chart/?symbol={quote(symbol)}"
+    # Yahoo writes a forex pair as "GBPCHF=X"; TradingView knows it as plain "GBPCHF".
+    return f"https://www.tradingview.com/chart/?symbol={quote(symbol.removesuffix('=X'))}"
+
+
+def price(value: float) -> str:
+    """As the chart shows it: 1.09825 for a forex pair, 152.37 for USD/JPY or a stock."""
+    return f"{value:g}"
 
 
 def _unix(iso: str) -> int:
@@ -127,7 +133,7 @@ if __name__ == "__main__":
     me = _call("getMe")
     print(f"Bot: @{me['username']}")
     if settings.telegram_chat_id:
-        ok = send_message("✅ הבוט מחובר — מכאן יגיעו התראות פריצה + ריטסט.")
+        ok = send_message("✅ הבוט מחובר — מכאן יגיעו התראות הסורק.")
         print("Test message sent." if ok else "Sending failed — see the log above.")
     else:
         chats = recent_chats()

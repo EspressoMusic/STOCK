@@ -49,6 +49,7 @@ const MARK_MODES = [
   { value: "anchor", label: "פס התחלה" },
 ];
 const MIN_TOUCHES = 2; // a price touched twice and turned from is a zone, on every timeframe
+const STRONG_TOUCHES = 3; // a zone touched this often shows even when it isn't the nearest
 const ZONE_TEXTS = { breakout: "פריצה", retest: "ריטסט" };
 const EMPTY_MARKS = { zones: [], events: [] };
 // Only the strategies that passed the profitability check (see lib/strategies.js).
@@ -73,14 +74,16 @@ function tradeCandleColors(trades) {
   return colors;
 }
 
-// Keeps the chart readable: only the zone price is in and the nearest zone above and
-// below it, plus the latest breakout+retest.
+// Keeps the chart readable: only the zone price is in, the nearest zone above and below
+// it and any zone touched STRONG_TOUCHES+ times, plus the latest breakout+retest.
 function declutter({ zones, events }, price) {
   const inside = zones.filter((z) => z.bottom <= price && price <= z.top);
   const above = zones.filter((z) => z.bottom > price).sort((a, b) => a.bottom - b.bottom);
   const below = zones.filter((z) => z.top < price).sort((a, b) => b.top - a.top);
+  const near = [...inside, ...above.slice(0, 1), ...below.slice(0, 1)];
+  const strong = zones.filter((z) => z.touches >= STRONG_TOUCHES && !near.includes(z));
   const latest = events.reduce((best, ev) => (!best || ev.retestIdx > best.retestIdx ? ev : best), null);
-  return { zones: [...inside, ...above.slice(0, 1), ...below.slice(0, 1)], events: latest ? [latest] : [] };
+  return { zones: [...near, ...strong], events: latest ? [latest] : [] };
 }
 
 function readPrefs() {

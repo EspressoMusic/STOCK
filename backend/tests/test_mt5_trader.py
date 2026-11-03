@@ -16,13 +16,14 @@ class FakeMT5:
 
     ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
     ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
-    TRADE_ACTION_DEAL, ORDER_TIME_GTC = 1, 0
+    TRADE_ACTION_DEAL, TRADE_ACTION_SLTP, ORDER_TIME_GTC = 1, 6, 0
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
     TRADE_RETCODE_DONE = 10009
 
     def __init__(self, demo=True, positions=(), names=("EURUSD",)):
         self.demo, self.positions, self.names = demo, list(positions), names
         self.sent = []
+        self.slippage = 0.0  # the fill's price off the quote
 
     def initialize(self, **kw):
         return True
@@ -60,7 +61,8 @@ class FakeMT5:
 
     def order_send(self, request):
         self.sent.append(request)
-        return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, order=777, price=request["price"], comment="done")
+        price = request["price"] + self.slippage if "price" in request else 0.0
+        return SimpleNamespace(retcode=self.TRADE_RETCODE_DONE, order=777, price=price, comment="done")
 
 
 @pytest.fixture
@@ -98,13 +100,22 @@ def test_opens_a_long_sized_by_the_risk(fake):
     # 0.5% of 10,000 = 50; one lot loses (1.1001 - 1.0950) * 100,000 = 510 at the stop.
     assert req["volume"] == 0.09
     assert req["type"] == fake.ORDER_TYPE_BUY and req["price"] == 1.1001
-    assert (req["sl"], req["tp"]) == (1.095, 1.115)
+    # The plan's 1:3 from the ask it's bought at: 1.1001 + 3 * (1.1001 - 1.0950).
+    assert (req["sl"], req["tp"]) == (1.095, 1.1154)
     assert req["magic"] == mt5_trader.MAGIC and req["type_filling"] == fake.ORDER_FILLING_IOC
 
 
 def test_opens_a_short_at_the_bid(fake):
     assert mt5_trader.open_trade("main", "EURUSD=X", SHORT) == 777
     assert fake.sent[0]["type"] == fake.ORDER_TYPE_SELL and fake.sent[0]["price"] == 1.1000
+
+
+def test_the_target_from_the_fill_when_it_isnt_the_quote(fake):
+    fake.slippage = -0.0003  # bought 3 pips under the ask
+    mt5_trader.open_trade("1h", "EURUSD=X", LONG)
+    order, moved = fake.sent
+    assert order["tp"] == 1.1154 and moved["action"] == fake.TRADE_ACTION_SLTP and moved["position"] == 777
+    assert (moved["sl"], moved["tp"]) == (1.095, 1.1142)  # 1.0998 + 3 * (1.0998 - 1.0950)
 
 
 def test_finds_the_brokers_symbol_name(fake):

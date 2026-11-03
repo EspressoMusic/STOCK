@@ -167,7 +167,11 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     if lots <= 0:
         logger.warning("MT5: %s even the smallest lot loses more than %.2f at the stop — skipped", name, risk)
         return None
-    sl, tp = round(plan.stop, info.digits), round(plan.target, info.digits)
+    # The target at the plan's ratio from the price it's opened at, not from the candle's
+    # close (plan.entry), a moment old: with a stop a few pips away, a pip either way made
+    # 1:2 into 1:3.4 (the user's EURUSD, 3/11/26).
+    ratio = abs(plan.target - plan.entry) / abs(plan.entry - plan.stop)
+    sl, tp = round(plan.stop, info.digits), round(target_at(price, plan.stop, ratio), info.digits)
     side = "BUY" if buy else "SELL"
     if settings.mt5_mode != "trade":
         logger.info("MT5 PAPER: would %s %s %.2f lots @%s sl=%s tp=%s", side, name, lots, price, sl, tp)
@@ -181,7 +185,17 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
         logger.warning("MT5: %s %s refused: %s", side, name, (getattr(res, "retcode", None), getattr(res, "comment", "")) if res else mt5.last_error())
         return None
     logger.info("MT5: %s %s %.2f lots @%s sl=%s tp=%s — ticket %s", side, name, lots, res.price, sl, tp, res.order)
+    fill_tp = round(target_at(res.price, plan.stop, ratio), info.digits) if res.price else tp
+    if fill_tp != tp:  # filled off the quote: the target from the fill
+        moved = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "symbol": name, "position": res.order, "sl": sl, "tp": fill_tp})
+        ok = moved is not None and moved.retcode == mt5.TRADE_RETCODE_DONE
+        logger.info("MT5: %s #%s target to %s from the fill -> %s", name, res.order, fill_tp, "done" if ok else getattr(moved, "comment", mt5.last_error()))
     return res.order
+
+
+def target_at(price: float, stop: float, ratio: float) -> float:
+    """The target ratio times the risk from price — above it for a long (stop under it)."""
+    return price + (price - stop) * ratio
 
 
 def move_stop(position, sl: float) -> bool:

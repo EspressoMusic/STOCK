@@ -11,6 +11,7 @@ from .db import SessionLocal
 from .ema_touch3_5m import run_strategy
 from .misc_strategies import run_misc_strategies
 from .monthly_zone import run_monthly_zone
+from .mt5_closed import report_closed
 from .penny_scan import run_penny_live
 from .pipeline import run_full_scan_cycle, run_broken_scan_cycle
 from .touch3_15m import run_touch3_alerts
@@ -90,6 +91,11 @@ def _touch3_job():
 
 def _mt5_strategy_job():
     run_strategy()
+    db = SessionLocal()
+    try:
+        report_closed(db)
+    finally:
+        db.close()
 
 
 def _trade_updates_job():
@@ -121,7 +127,8 @@ def start_scheduler():
     )
 
     # The strategy MetaTrader 5 trades on its own (ema_touch3_5m.py): 5 seconds after each
-    # 5m candle closes — its candles come from the terminal, with no delay.
+    # 5m candle closes — its candles come from the terminal, with no delay. Then the trades
+    # that closed go to the Nasdaq bot (mt5_closed.py, the user's ask 3/11/26).
     if settings.mt5_mode != "off":
         scheduler.add_job(
             _mt5_strategy_job,

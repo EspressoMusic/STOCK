@@ -126,3 +126,26 @@ class SentAlert(Base):
     key = Column(String, unique=True, nullable=False, index=True)
     symbol = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TrackedTrade(Base):
+    """An alert's trade (trade_plan.py), watched until price reaches its target or its
+    stop — then the alert's bot replies to the alert with the outcome (trade_tracker.py)."""
+    __tablename__ = "tracked_trades"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False, index=True)  # the alert's (SentAlert.key)
+    symbol = Column(String, nullable=False, index=True)
+    name = Column(String)  # as the alert shows it; None = the symbol
+    bot = Column(String, nullable=False)  # the alert's bot, by telegram.bot_chat's name
+    chat_id = Column(String, nullable=False)
+    message_id = Column(Integer, nullable=False)  # the alert's, which the outcome replies to
+    direction = Column(String, nullable=False)  # "up" = long | "down" = short
+    entry = Column(Float, nullable=False)
+    stop = Column(Float, nullable=False)
+    target = Column(Float, nullable=False)
+    # Unix start of the first bar not yet checked in full — the one the alert went out in, at first.
+    checked_from = Column(Integer, nullable=False)
+    outcome = Column(String, index=True)  # None while open | "target" | "stop"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    closed_at = Column(DateTime)

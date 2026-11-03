@@ -82,8 +82,8 @@ export default function AlertChartModal({ alert, onClose }) {
   }, [onClose]);
 
   return (
-    <div className="chart-modal-overlay" onClick={onClose}>
-      <div className="chart-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="chart-modal-overlay alert-chart-overlay" onClick={onClose}>
+      <div className="chart-modal alert-chart-modal" onClick={(e) => e.stopPropagation()}>
         <div className="chart-modal-head">
           <div className="chart-modal-title">
             <span className="symbol">{alert.symbol}</span>

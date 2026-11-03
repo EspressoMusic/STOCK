@@ -88,7 +88,11 @@ def get_4h_dataframe(symbol: str, period: Optional[str] = None) -> Optional[pd.D
 
     if df is None or df.empty:
         return None
+    return group_4h(df)
 
+
+def group_4h(df: pd.DataFrame) -> pd.DataFrame:
+    """4h bars from these 1h bars, as get_4h_dataframe() builds them."""
     day = df.index.date
     bar_in_day = pd.Series(range(len(df)), index=df.index).groupby(day).cumcount().to_numpy()
     chunk_idx = bar_in_day // 4

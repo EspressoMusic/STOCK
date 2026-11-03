@@ -469,6 +469,7 @@ class ZoneTouchSetupOut(BaseModel):
 
     symbol: str
     name: Optional[str] = None
+    direction: str
     price: float
     zone_bottom: float
     zone_top: float

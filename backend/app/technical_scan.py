@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 import yfinance as yf
@@ -115,14 +115,17 @@ class EmaTouch4hScanResult:
     stocks: list[EmaTouchCandidate]
 
 
-def _get_stock_universe(limit: int, min_volume: int = 300_000) -> list[tuple[str, Optional[str]]]:
-    """Liquid Nasdaq stocks, ranked by trading volume — a cheap pre-filter so the
-    expensive per-symbol candle fetch below only runs on names worth watching."""
+def _get_stock_universe(
+    limit: int, min_volume: int = 300_000, exchanges: Sequence[str] = NASDAQ_EXCHANGES
+) -> list[tuple[str, Optional[str]]]:
+    """Liquid stocks (Nasdaq unless other Yahoo exchange codes are given), ranked by
+    trading volume — a cheap pre-filter so the expensive per-symbol candle fetch below
+    only runs on names worth watching."""
     query = EquityQuery(
         "and",
         [
             EquityQuery("eq", ["region", "us"]),
-            EquityQuery("is-in", ["exchange", *NASDAQ_EXCHANGES]),
+            EquityQuery("is-in", ["exchange", *exchanges]),
             EquityQuery("gt", ["dayvolume", min_volume]),
         ],
     )
@@ -640,6 +643,14 @@ TRIPLE_TOUCH_EXTRA_FOREX = [
     ("NZDCAD=X", "NZD/CAD"),
     ("CADCHF=X", "CAD/CHF"),
 ]
+# The pairs on the user's watchlist — Telegram alerts go out on these only (29/10/26).
+ALERT_FOREX_SYMBOLS = {
+    "USDCAD=X", "GBPAUD=X", "GBPUSD=X", "GBPCAD=X",
+    "EURGBP=X", "NZDUSD=X", "EURAUD=X", "AUDUSD=X", "AUDJPY=X", "USDJPY=X",
+    "AUDCAD=X", "GBPJPY=X", "AUDCHF=X", "EURJPY=X", "EURUSD=X",
+    "CADJPY=X", "USDCHF=X", "GBPCHF=X", "NZDJPY=X", "NZDCAD=X",
+}
+ALERT_FOREX = [(sym, name) for sym, name in FOREX_PAIRS + TRIPLE_TOUCH_EXTRA_FOREX if sym in ALERT_FOREX_SYMBOLS]
 
 
 @dataclass

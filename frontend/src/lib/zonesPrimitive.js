@@ -176,13 +176,14 @@ export class ZonesPrimitive {
     return ev.dir === "up" ? COLORS.upLine : COLORS.downLine;
   }
 
-  // Pixel rect hugging one candle, wick to wick, with a few px to spare.
-  _candleRect(idx) {
+  // Pixel rect hugging one candle, wick to wick, with a few px to spare — or only the
+  // part of it between part.bottom and part.top (prices), when given.
+  _candleRect(idx, part) {
     const candle = this._state.candles[idx];
     if (!candle) return null;
     const x = this._chart.timeScale().logicalToCoordinate(idx);
-    const yHigh = this._series.priceToCoordinate(candle.high);
-    const yLow = this._series.priceToCoordinate(candle.low);
+    const yHigh = this._series.priceToCoordinate(part?.top ?? candle.high);
+    const yLow = this._series.priceToCoordinate(part?.bottom ?? candle.low);
     if ([x, yHigh, yLow].some((v) => v == null || !Number.isFinite(v))) return null;
     const half = Math.max(4, this._chart.timeScale().options().barSpacing * 0.45) + 3;
     return { x: x - half, y: yHigh - 4, w: half * 2, h: yLow - yHigh + 8, cx: x };
@@ -267,7 +268,7 @@ export class ZonesPrimitive {
     }
 
     for (const mark of candleMarks) {
-      const c = this._candleRect(mark.idx);
+      const c = this._candleRect(mark.idx, mark.top != null ? mark : null);
       if (!c) continue;
       ctx.fillStyle = TONES[mark.tone].fill;
       ctx.beginPath();
@@ -340,18 +341,23 @@ export class ZonesPrimitive {
       ];
       for (const { idx, text, above } of marks) this._markCandle(ctx, idx, text, color, above, paneHeight);
     }
-    for (const mark of candleMarks) this._markCandle(ctx, mark.idx, mark.text, TONES[mark.tone].line, mark.above, paneHeight);
+    for (const mark of candleMarks) {
+      this._markCandle(ctx, mark.idx, mark.text, TONES[mark.tone].line, mark.above, paneHeight, mark.top != null ? mark : null);
+    }
 
     ctx.restore();
   }
 
-  _markCandle(ctx, idx, text, color, above, paneHeight) {
+  // The frame goes around the whole candle, or only its part (see _candleRect); the label
+  // still points at the candle's end, clear of the candle itself.
+  _markCandle(ctx, idx, text, color, above, paneHeight, part = null) {
     const c = this._candleRect(idx);
     if (!c) return;
+    const f = part ? this._candleRect(idx, part) : c;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.roundRect(c.x, c.y, c.w, c.h, 4);
+    ctx.roundRect(f.x, f.y, f.w, f.h, 4);
     ctx.stroke();
     if (!text) return;
     const roomAbove = c.y > 24;

@@ -105,8 +105,8 @@ def db(monkeypatch):
 
 def test_each_setup_is_sent_once(monkeypatch, db):
     monkeypatch.setattr(retest_alerts, "scan_retest_setups", lambda: (100, [setup("AAA"), setup("BBB")]))
-    send = Mock(return_value=True)
-    monkeypatch.setattr(retest_alerts.telegram, "send_message", send)
+    send = Mock(return_value=1)
+    monkeypatch.setattr(retest_alerts.telegram, "post_message", send)
 
     assert run_retest_alerts(db).sent_count == 2
     assert run_retest_alerts(db).sent_count == 0
@@ -115,21 +115,18 @@ def test_each_setup_is_sent_once(monkeypatch, db):
 
 def test_failed_send_is_retried_next_run(monkeypatch, db):
     monkeypatch.setattr(retest_alerts, "scan_retest_setups", lambda: (100, [setup("AAA")]))
-    monkeypatch.setattr(retest_alerts.telegram, "send_message", Mock(return_value=False))
+    monkeypatch.setattr(retest_alerts.telegram, "post_message", Mock(return_value=None))
     assert run_retest_alerts(db).sent_count == 0
 
-    monkeypatch.setattr(retest_alerts.telegram, "send_message", Mock(return_value=True))
+    monkeypatch.setattr(retest_alerts.telegram, "post_message", Mock(return_value=1))
     assert run_retest_alerts(db).sent_count == 1
 
 
-def test_message_links_to_the_scanner_with_the_marking():
-    text = retest_alerts.format_message(setup("AAA"))
-    assert "https://www.tradingview.com/chart/?symbol=AAA" in text
-    hour = 1792468800  # 2026-10-20T04:00:00Z
-    assert (
-        f"?symbol=AAA&amp;tf=1h&amp;zone=1,2&amp;from=1785556800&amp;dir=up"
-        f"&amp;breakout=1790827200&amp;retests={hour},{hour},{hour}"
-    ) in text
+def test_message_is_long_or_short_and_the_symbol():
+    s = setup("AAA")
+    assert retest_alerts.format_message(s).startswith("🟢 לונג · <b>AAA</b>\n")
+    s.direction = "down"
+    assert retest_alerts.format_message(s).startswith("🔴 שורט · <b>AAA</b>\n")
 
 
 def test_forex_pair_shows_its_name_and_opens_on_tradingview():

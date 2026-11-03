@@ -62,18 +62,51 @@ class Settings(BaseSettings):
     stoch_extreme_min_stock_volume: int = 50_000
 
     # Telegram alerts, forex pairs only for now: breakout + 3 touches on the 1h chart
-    # (app/retest_alerts.py), checked every 4 hours on the 4h candle closes.
+    # (app/retest_alerts.py), checked every hour on the 1h candle closes.
     # Token from @BotFather; chat id via `python -m app.telegram`. Either blank = no alerts.
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    # Pairs still inside a 3-touch 4h zone (app/zone_touch_scan.py), one Telegram list a day.
-    zone_touch_alert_time: str = "16:45"  # Mon-Fri, scan_timezone — after the US close
+    # Optional second bot just for the 1h alerts ("אסטרטגיה 1"), so they come in their own
+    # Telegram chat; blank = the main bot sends them too. Same chat id — press Start in it once.
+    telegram_1h_bot_token: str = ""
+    # Third bot, for the 4h zone alerts on stocks; blank = no stock alerts. Same chat id too.
+    telegram_stocks_bot_token: str = ""
+    # Fourth bot, for Nasdaq 100 index scalping alerts; blank = off. Same chat id too.
+    telegram_nasdaq_bot_token: str = ""
+    # Fifth bot — penny stocks until 29/10/26, now the 15m forex drop-and-return alerts
+    # (app/drop_return_scan.py); the name stays so .env does. Blank = off. Same chat id too.
+    telegram_penny_bot_token: str = ""
+    # Each bot's chat, if not the main one — e.g. a Telegram channel the bot posts in (its
+    # @username or -100... id, with the bot an admin there). Blank = telegram_chat_id.
+    telegram_1h_chat_id: str = ""
+    telegram_stocks_chat_id: str = ""
+    telegram_nasdaq_chat_id: str = ""
+    telegram_penny_chat_id: str = ""
+    # The stocks' 4h alerts, types 1 and 2 (app/tight_touch_scan.py): after each of the
+    # session's two 4h candles. The pairs' 4h alerts run on their own 4h closes.
+    stock_tight_touch_alert_times: str = "13:35,16:05"
+    # Every US stock that trades, penny stocks and OTC included (the user asked for as many
+    # as possible): ~6500 names with this volume, one paced Yahoo request each — ~25 minutes.
+    stock_zone_touch_universe_size: int = 10_000
+    stock_zone_touch_min_volume: int = 20_000
     # Candle times in the alert messages.
     alert_timezone: str = "Asia/Jerusalem"
     # The scanner page the alerts link to, which opens the alert's chart with its marking
     # (frontend AlertChartModal). The live site, so the link opens on the phone too; for the
     # local one use 127.0.0.1, not localhost: Telegram silently drops links to "localhost".
     alert_chart_url: str = "https://stock-one-flax.vercel.app/"
+
+    # MetaTrader 5 (app/mt5_trader.py): trades on the terminal logged in on this computer.
+    # "off" | "paper" (only logged) | "trade" (demo only, unless mt5_allow_real).
+    mt5_mode: str = "off"
+    mt5_allow_real: bool = False
+    mt5_terminal_path: str = ""  # blank = the installed one
+    # The strategy it trades on its own (app/ema_touch3_5m.py), on these symbols.
+    mt5_strategy_symbols: str = "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,USDCAD,NZDUSD,NAS100"
+    # telegram.bot_chat names whose forex alerts are traded too, e.g. "main,1h"; blank = none.
+    mt5_bots: str = ""
+    mt5_risk_percent: float = 1.0  # of the balance, lost at the stop
+    mt5_symbol_suffix: str = ""  # the broker's, e.g. ".m" for EURUSD.m; blank = found
 
     # Storage
     database_url: str = "sqlite:///./stockbot.db"

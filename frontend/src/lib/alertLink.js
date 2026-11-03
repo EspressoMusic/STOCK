@@ -38,13 +38,28 @@ export function alertMarking(alert, candles) {
   const mid = (alert.bottom + alert.top) / 2;
   const up = alert.dir === "up";
   const candleMarks = [];
-  const mark = (time, text, tone, above) => {
+  // A touch is framed only where the candle reaches into the zone — or at its tip, when it
+  // came within reach without getting in.
+  const touchPart = (c) => {
+    const bottom = Math.max(c.low, alert.bottom);
+    const top = Math.min(c.high, alert.top);
+    if (bottom <= top) return { bottom, top };
+    const tip = c.low > alert.top ? c.low : c.high;
+    return { bottom: tip, top: tip };
+  };
+  const mark = (time, text, tone, above, touch = true) => {
     const idx = idxOf(time);
     if (idx === -1) return;
     const c = candles[idx];
-    candleMarks.push({ idx, text, tone, above: above ?? (c.high + c.low) / 2 > mid });
+    candleMarks.push({
+      idx,
+      text,
+      tone,
+      above: above ?? (c.high + c.low) / 2 > mid,
+      ...(touch && touchPart(c)),
+    });
   };
-  if (alert.breakout) mark(alert.breakout, "פריצה", alert.dir, up);
+  if (alert.breakout) mark(alert.breakout, "פריצה", alert.dir, up, false);
   alert.retests.forEach((time, n) => mark(time, `ריטסט ${n + 1}`, alert.dir, !up));
   alert.touches.forEach((time, n) => mark(time, `נגיעה ${n + 1}`, "zone"));
   if (!candleMarks.length) return null;

@@ -885,6 +885,25 @@ html, body {
   padding: 20px;
 }
 
+/* opened from a Telegram alert: the chart with its marking fills the whole screen */
+.chart-modal-overlay.alert-chart-overlay {
+  padding: 0;
+}
+
+.chart-modal.alert-chart-modal {
+  max-width: none;
+  max-height: none;
+  height: 100vh;
+  height: 100dvh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.alert-chart-modal .chart-modal-body {
+  padding: 0 4px 4px;
+}
+
 /* full-screen chart: centre the message in the chart instead of at the top,
    where it collided with the floating symbol/price block */
 .chart-scan-screen .chart-state-msg {

@@ -5,6 +5,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -31,6 +33,7 @@ from .schemas import (
 )
 from .pipeline import run_scan
 from .scheduler import start_scheduler, next_run_times
+from . import status_bot
 from .technical_scan import (
     scan_technical_signals, DEFAULT_TIMEFRAME, scan_ema50_breakout, scan_ema50_touch_4h,
     scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_4h, scan_stoch_extreme_daily_4h,
@@ -51,7 +54,17 @@ from . import license as license_module
 from . import paddle as paddle_module
 from . import auth as auth_module
 
-logging.basicConfig(level=logging.INFO)
+# Also to backend/server.log, so a missed alert or trade update can be traced afterwards.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            Path(__file__).resolve().parent.parent / "server.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+        ),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +72,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     init_db()
     start_scheduler()
+    status_bot.start()
     yield
 
 
@@ -421,7 +435,7 @@ def latest_retest_alerts():
 
 @app.post("/api/retest-alerts/run", response_model=RetestAlertScanOut)
 def trigger_retest_alerts(db: Session = Depends(get_db)):
-    # Also runs every 4 hours (scheduler.py). Sends only setups not alerted before.
+    # Also runs every hour (scheduler.py). Sends only setups not alerted before.
     return run_retest_alerts(db)
 
 
@@ -435,7 +449,7 @@ def latest_zone_touch_scan():
 
 @app.post("/api/zone-touch-scan/run", response_model=ZoneTouchScanOut)
 def trigger_zone_touch_scan():
-    # The trainer's "סרוק" — no Telegram; the daily run (scheduler.py) sends the list.
+    # The trainer's "סרוק" — no Telegram; the alerts (run_zone_touch_alerts) run on their own.
     return run_zone_touch_scan()
 
 

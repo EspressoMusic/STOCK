@@ -11,3 +11,5 @@ httpx
 google-auth
 requests>=2.31
 truststore>=0.9
+matplotlib>=3.8
+MetaTrader5; sys_platform == "win32"

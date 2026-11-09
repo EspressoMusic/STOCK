@@ -9,7 +9,6 @@ import { getSignals, signalPictureUrl } from "../api";
 
 const KINDS = ["weekly", "day", "forex"];
 const REFRESH_INTERVAL_MS = 60000;
-const DAY_MS = 86400000;
 
 function dayLabel(date, lang) {
   return date.toLocaleDateString(lang === "en" ? "en-GB" : "he-IL", { weekday: "long", day: "2-digit", month: "2-digit" });
@@ -64,6 +63,7 @@ function SignalCard({ signal, onOpen }) {
           {signal.name || signal.symbol}
         </a>
         {signal.strong && <span className="badge-pill neutral">{t("signals.strong")}</span>}
+        {signal.example && <span className="badge-pill neutral">{t("signals.example")}</span>}
         <span className="signal-card-time">{timeLabel(new Date(signal.created_at), lang)}</span>
       </div>
       {signal.has_picture ? (
@@ -94,7 +94,8 @@ function Days({ signals, onOpen }) {
 function PastWeek({ start, signals, onOpen }) {
   const { t, lang } = useLang();
   const [open, setOpen] = useState(false);
-  const end = new Date(start.getTime() + 6 * DAY_MS);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6); // by the calendar: a clock change makes one day 23 or 25 hours
   return (
     <section className="signals-week">
       <button type="button" className={`signals-week-head ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)}>

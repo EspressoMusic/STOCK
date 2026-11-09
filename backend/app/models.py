@@ -143,6 +143,7 @@ class SignalLog(Base):
     details = Column(Text)  # the caption's lines under the TradingView link, e.g. stock day's reasons
     has_picture = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    example = Column(Integer, default=0, nullable=False)  # 1 = from history, never sent (signal_log.record)
 
 
 class TrackedTrade(Base):

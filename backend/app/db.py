@@ -16,7 +16,11 @@ def _add_missing_columns():
     already exist — this backfills newly added columns on an existing sqlite file
     so upgrades don't require deleting the local dev database."""
     inspector = inspect(engine)
-    if "stock_results" not in inspector.get_table_names():
+    tables = inspector.get_table_names()
+    if "signal_log" in tables and "example" not in {col["name"] for col in inspector.get_columns("signal_log")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE signal_log ADD COLUMN example INTEGER NOT NULL DEFAULT 0"))
+    if "stock_results" not in tables:
         return
     existing = {col["name"] for col in inspector.get_columns("stock_results")}
     if "company_blurb" not in existing:

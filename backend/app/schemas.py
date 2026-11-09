@@ -454,6 +454,7 @@ class SignalOut(BaseModel):
     has_picture: bool
     tradingview: str
     created_at: datetime  # when it went out, UTC
+    example: bool = False  # from history, never sent
 
 
 class RetestSetupOut(BaseModel):

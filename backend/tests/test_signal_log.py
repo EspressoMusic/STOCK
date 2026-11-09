@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -42,6 +44,17 @@ def test_without_a_picture_or_reasons(db):
 def test_other_strategies_are_not_kept(db):
     RECORD("ema-touch3-5m:NAS100:up:1", "NAS100", None, caption(True), b"png", db=db)
     assert db.query(SignalLog).count() == 0
+
+
+def test_an_example_from_history_is_listed_and_dated_then(db):
+    then = datetime(2026, 10, 14, 13)
+    RECORD("weekly:OLD:1", "OLD", None, caption(True, "שבועי"), b"png", db=db, example_at=then)
+    RECORD("weekly:NEW:2", "NEW", None, caption(True, "שבועי"), None, db=db)
+    db.add(SentAlert(key="weekly:NEW:2", symbol="NEW"))
+    db.commit()
+    new, old = signal_log.latest(db, "weekly", 10)
+    assert (new.symbol, new.example) == ("NEW", 0)
+    assert (old.symbol, old.example, old.created_at) == ("OLD", 1, then)
 
 
 def test_lists_only_live_alerts_of_the_kind_newest_first(db):

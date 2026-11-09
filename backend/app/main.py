@@ -526,7 +526,7 @@ def list_signals(kind: str = Query(...), limit: int = Query(5000, ge=1, le=20000
         SignalOut(
             id=r.id, kind=r.kind, symbol=r.symbol, name=r.name, direction=r.direction, strong=bool(r.strong),
             details=r.details, has_picture=bool(r.has_picture), tradingview=tradingview_url(r.symbol),
-            created_at=r.created_at.replace(tzinfo=timezone.utc),
+            created_at=r.created_at.replace(tzinfo=timezone.utc), example=bool(r.example),
         )
         for r in signal_log.latest(db, kind, limit)
     ]

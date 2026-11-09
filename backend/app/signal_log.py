@@ -4,13 +4,17 @@ reasons and its chart picture. A strategy is told by its key's prefix, not its b
 bot that changes strategy doesn't mix the two on the page.
 
 Only alerts that are also in SentAlert are listed: an example sent from a module's
-__main__ goes through the same send, but isn't a live signal."""
+__main__ goes through the same send, but isn't a live signal. Examples from history are
+listed too when kept as such (example_at), marked on the page (the user's ask, 9/11/26: old
+examples in each strategy's history)."""
 import html
 import logging
 import re
 from pathlib import Path
+from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .db import SessionLocal
@@ -44,8 +48,12 @@ def picture_path(signal_id: int) -> Path:
     return PICTURE_DIR / f"{signal_id}.png"
 
 
-def record(key: str, symbol: str, name: Optional[str], text: str, png: Optional[bytes], db: Optional[Session] = None):
-    """Keeps an alert that just went out, if it's one of the page's; never raises."""
+def record(
+    key: str, symbol: str, name: Optional[str], text: str, png: Optional[bytes], db: Optional[Session] = None,
+    example_at: Optional[datetime] = None,
+):
+    """Keeps an alert that just went out, if it's one of the page's; never raises. example_at
+    (UTC): an example from history instead, kept as if it went out then."""
     kind = kind_of(key)
     if kind is None:
         return
@@ -59,6 +67,9 @@ def record(key: str, symbol: str, name: Optional[str], text: str, png: Optional[
         row.name = name
         row.direction, strong, row.details = _caption(text)
         row.strong = int(strong)
+        row.example = int(example_at is not None)
+        if example_at is not None:
+            row.created_at = example_at
         db.flush()  # the id names the picture
         if png is not None:
             PICTURE_DIR.mkdir(exist_ok=True)
@@ -74,11 +85,11 @@ def record(key: str, symbol: str, name: Optional[str], text: str, png: Optional[
 
 
 def latest(db: Session, kind: str, limit: int) -> list[SignalLog]:
-    """The kind's live signals, newest first."""
+    """The kind's live signals and examples, newest first."""
     return (
         db.query(SignalLog)
-        .join(SentAlert, SentAlert.key == SignalLog.key)
-        .filter(SignalLog.kind == kind)
+        .outerjoin(SentAlert, SentAlert.key == SignalLog.key)
+        .filter(SignalLog.kind == kind, or_(SentAlert.id.isnot(None), SignalLog.example == 1))
         .order_by(SignalLog.created_at.desc(), SignalLog.id.desc())
         .limit(limit)
         .all()

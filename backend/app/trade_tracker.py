@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 from sqlalchemy.orm import Session
 
-from . import alert_chart, mt5_trader, telegram
+from . import alert_chart, mt5_trader, signal_log, telegram
 from .candles import Candle, _to_candles, get_candles
 from .db import SessionLocal
 from .models import TrackedTrade
@@ -60,6 +60,7 @@ def send_alert(
         message_id = telegram.post_photo(png, text, chat_id=chat, bot_token=token)
     if message_id is None:
         return False
+    signal_log.record(key, symbol, name, text, png)
     if plan is not None:
         track(key, symbol, name, bot, chat, message_id, plan)
         mt5_trader.open_trade(bot, symbol, plan)
@@ -171,18 +172,21 @@ def format_update(trade: TrackedTrade) -> str:
     return f"❌ סטופ לוס · <b>{name}</b> · {telegram.price(round(trade.stop, 5))}"
 
 
-def check_trades(db: Session, now: Optional[float] = None, fetch: Callable[[str, float], list[Candle]] = fetch_bars) -> int:
-    """Checks the open trades whose market is open, one fetch per symbol, and replies to
-    the alert of each that reached its target or stop, with the chart's picture
-    (outcome_picture); returns how many replies went out. One whose reply fails stays
-    open, so the next run tries it again."""
+def check_trades(
+    db: Session, now: Optional[float] = None, fetch: Callable[[str, float], list[Candle]] = fetch_bars,
+    bots: Optional[Sequence[str]] = None,
+) -> int:
+    """Checks the open trades whose market is open — only the named bots', if any are
+    named — one fetch per symbol, and replies to the alert of each that reached its target
+    or stop, with the chart's picture (outcome_picture); returns how many replies went
+    out. One whose reply fails stays open, so the next run tries it again."""
     now = now or time.time()
     if not _run_lock.acquire(blocking=False):
         return 0
     try:
         by_symbol: dict[str, list[TrackedTrade]] = defaultdict(list)
         for t in db.query(TrackedTrade).filter(TrackedTrade.outcome.is_(None)):
-            if in_session(t.symbol, now):
+            if (bots is None or t.bot in bots) and in_session(t.symbol, now):
                 by_symbol[t.symbol].append(t)
         sent = 0
         for symbol, trades in by_symbol.items():

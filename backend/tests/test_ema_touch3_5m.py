@@ -5,7 +5,7 @@ import pytest
 from app import ema_touch3_5m, mt5_trader
 from app.candles import Candle
 from app.config import settings
-from app.ema_touch3_5m import find_entry, manage, reached_one_r, turned_against
+from app.ema_touch3_5m import closed_through, find_entry, manage, open_gap_against, reached, turned_against
 from app.zones import Zone
 
 
@@ -53,12 +53,65 @@ def test_the_touches_are_counted_without_the_ranging_check(monkeypatch):
     assert seen["ranging"] is False
 
 
-def test_reached_one_r_from_the_trades_candle_on():
+def test_no_entry_while_a_gap_is_open_against_it(monkeypatch):
+    stub_setup(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(ema_touch3_5m, "open_gap_against", lambda w, d: seen.update(direction=d) or True)
+    assert find_entry(LONG, ema=101.0) is None
+    assert seen["direction"] == "up"
+
+
+def test_no_entry_once_a_candle_closed_through_the_zone(monkeypatch):
+    stub_setup(monkeypatch)
+    # The visit's first candle closed a little under the zone's bottom (100).
+    under = bars(*[ABOVE] * 4, (102, 102.5, 99.8, 99.95), ENTRY_UP)
+    assert find_entry(under, ema=99.0) is None
+    stub_setup(monkeypatch, direction="down")
+    over = bars(*[(98, 99, 97, 98)] * 4, (99, 101.2, 98.8, 101.05), (99.8, 100, 98.5, 98.6))
+    assert find_entry(over, ema=103.0) is None
+
+
+def test_closed_through_counts_closes_not_wicks():
+    assert not closed_through(bars((100.5, 101, 99.5, 100.2)), "up", 100, 101)
+    assert closed_through(bars((100.5, 101, 99.5, 99.9)), "up", 100, 101)
+    assert not closed_through(bars((100.5, 101.5, 100, 100.8)), "down", 100, 101)
+    assert closed_through(bars((100.5, 101.5, 100, 101.1)), "down", 100, 101)
+
+
+SMALL = (100, 100.3, 99.9, 100.1)  # bodies of 0.1
+# A big red candle (a body of 1.9) and the one after it doesn't reach back up to the
+# low before it (99.9): a gap 99.5-99.9.
+DROP = bars(*[SMALL] * 21, (100, 100.2, 98, 98.1), (98.1, 99.5, 97.8, 99))
+# The same up: a gap 100.3-100.5.
+RISE = bars(*[SMALL] * 21, (100, 102, 99.9, 101.9), (101.9, 102.2, 100.5, 101))
+
+
+def test_a_big_red_candles_gap_blocks_longs_until_closed_over():
+    assert open_gap_against(DROP, "up")
+    assert not open_gap_against(DROP, "down")
+    assert open_gap_against(DROP + bars((99, 100.2, 98.9, 99.8)), "up")  # its wick only
+    assert not open_gap_against(DROP + bars((99, 100.2, 98.9, 100)), "up")
+
+
+def test_a_big_green_candles_gap_blocks_shorts():
+    assert open_gap_against(RISE, "down")
+    assert not open_gap_against(RISE, "up")
+    assert not open_gap_against(RISE + bars((101, 101.2, 100, 100.2)), "down")
+
+
+def test_no_gap_or_no_big_candle_blocks_nothing():
+    no_gap = bars(*[SMALL] * 21, (100, 100.2, 98, 98.1), (98.1, 100, 97.8, 99))
+    assert not open_gap_against(no_gap, "up")
+    small = bars(*[SMALL] * 21, (100, 100.1, 99.7, 99.8), (99.8, 99.85, 99.6, 99.7))
+    assert not open_gap_against(small, "up")
+
+
+def test_reached_from_the_trades_candle_on():
     window = bars((100, 100.5, 99.5, 100), (100, 101.2, 99.8, 101), (101, 101.5, 100.5, 101))
-    # Risk 1 from 100: 1:1 is 101; the candle before the trade doesn't count.
-    assert reached_one_r(window, "up", 100, 1, opened=300) == 1
-    assert reached_one_r(window, "up", 100, 2, opened=300) is None
-    assert reached_one_r(window, "down", 101, 1, opened=0) == 0
+    # 1 in profit from 100 is 101; the candle before the trade doesn't count.
+    assert reached(window, "up", 100, 1, opened=300) == 1
+    assert reached(window, "up", 100, 2, opened=300) is None
+    assert reached(window, "down", 101, 1, opened=0) == 0
 
 
 def test_turned_against_needs_a_third_touch_after_one_to_one(monkeypatch):
@@ -89,9 +142,43 @@ def position(**kw):
 @pytest.fixture
 def moved(monkeypatch):
     moved = []
-    monkeypatch.setattr(mt5_trader, "move_stop", lambda p, sl: moved.append((p.ticket, sl)))
+    monkeypatch.setattr(mt5_trader, "move_stop", lambda p, sl: moved.append((p.ticket, sl)) or True)
     monkeypatch.setattr(ema_touch3_5m, "turned_against", lambda w, d, since: True)
     return moved
+
+
+def test_stop_to_one_to_one_once_one_and_a_half_to_one(monkeypatch, moved):
+    window = bars((100, 101.6, 99.9, 101.5))  # 1.5:1 = 101.5
+    monkeypatch.setattr(mt5_trader, "mt5", FakeMT5(position()))
+    manage("XAUUSD", window)
+    assert moved == [(1, 101.0)]
+
+
+def test_a_short_locks_one_to_one_too(monkeypatch, moved):
+    window = bars((100, 100.1, 98.4, 98.6))
+    monkeypatch.setattr(mt5_trader, "mt5", FakeMT5(position(type=1, sl=101.0, tp=98.0)))
+    manage("XAUUSD", window)
+    assert moved == [(1, 99.0)]
+
+
+def test_from_break_even_on_to_one_to_one_once_only(monkeypatch, moved):
+    window = bars((100, 101.6, 99.9, 101.5))
+    monkeypatch.setattr(mt5_trader, "mt5", FakeMT5(position(sl=100.0), position(ticket=2, sl=101.0)))
+    manage("XAUUSD", window)
+    assert moved == [(1, 101.0)]
+
+
+def test_back_under_one_to_one_break_even_instead(monkeypatch):
+    moved = []
+    monkeypatch.setattr(mt5_trader, "move_stop", lambda p, sl: moved.append(sl) or sl != 101.0)
+    window = bars((100, 101.6, 99.9, 100.5))
+    monkeypatch.setattr(mt5_trader, "mt5", FakeMT5(position()))
+    manage("XAUUSD", window)
+    assert moved == [101.0, 100.0]
+    moved.clear()
+    monkeypatch.setattr(mt5_trader, "mt5", FakeMT5(position(sl=100.0)))  # already there
+    manage("XAUUSD", window)
+    assert moved == [101.0]
 
 
 def test_break_even_once_one_to_one_and_turned(monkeypatch, moved):

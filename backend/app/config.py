@@ -61,27 +61,32 @@ class Settings(BaseSettings):
     stoch_extreme_stock_universe_size: int = 500
     stoch_extreme_min_stock_volume: int = 50_000
 
-    # Telegram alerts, forex pairs only for now: breakout + 3 touches on the 1h chart
-    # (app/retest_alerts.py), checked every hour on the 1h candle closes.
-    # Token from @BotFather; chat id via `python -m app.telegram`. Either blank = no alerts.
+    # Telegram: since 4/11/26 five bots, one strategy each (scheduler.py). The names are older
+    # than the strategies; .env keeps them. Tokens from @BotFather, blank = that bot is off;
+    # one chat id, via `python -m app.telegram` — press Start in each bot once.
+    # The main bot, forex (app/daily_zone_1h.py). Either blank = no alerts at all.
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    # Optional second bot just for the 1h alerts ("אסטרטגיה 1"), so they come in their own
-    # Telegram chat; blank = the main bot sends them too. Same chat id — press Start in it once.
+    # The 1h bot, stocks day trading (app/stock_day.py).
     telegram_1h_bot_token: str = ""
-    # Third bot, for the 4h zone alerts on stocks; blank = no stock alerts. Same chat id too.
+    # The stocks bot, the weekly zone (app/weekly_zone.py).
     telegram_stocks_bot_token: str = ""
-    # Fourth bot, for Nasdaq 100 index scalping alerts; blank = off. Same chat id too.
+    # The Nasdaq bot, MetaTrader 5's trades as they open and close (app/mt5_opened.py, app/mt5_closed.py).
     telegram_nasdaq_bot_token: str = ""
-    # Fifth bot — penny stocks until 29/10/26, now the 15m forex drop-and-return alerts
-    # (app/drop_return_scan.py); the name stays so .env does. Blank = off. Same chat id too.
+    # The penny bot, penny stock shorts.
     telegram_penny_bot_token: str = ""
+    # Off since 4/11/26, code kept: the EUR/USD 1m signals (app/ema_touch_1m.py) and the bot the
+    # monthly 50 EMA had before the stocks bot.
+    telegram_scalp_bot_token: str = ""
+    telegram_ema_bot_token: str = ""
     # Each bot's chat, if not the main one — e.g. a Telegram channel the bot posts in (its
     # @username or -100... id, with the bot an admin there). Blank = telegram_chat_id.
     telegram_1h_chat_id: str = ""
     telegram_stocks_chat_id: str = ""
     telegram_nasdaq_chat_id: str = ""
     telegram_penny_chat_id: str = ""
+    telegram_scalp_chat_id: str = ""
+    telegram_ema_chat_id: str = ""
     # The stocks' 4h alerts, types 1 and 2 (app/tight_touch_scan.py): after each of the
     # session's two 4h candles. The pairs' 4h alerts run on their own 4h closes.
     stock_tight_touch_alert_times: str = "13:35,16:05"
@@ -101,8 +106,8 @@ class Settings(BaseSettings):
     mt5_mode: str = "off"
     mt5_allow_real: bool = False
     mt5_terminal_path: str = ""  # blank = the installed one
-    # The strategy it trades on its own (app/ema_touch3_5m.py), on these symbols.
-    mt5_strategy_symbols: str = "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,USDCAD,NZDUSD,NAS100"
+    # The strategy it trades on its own (app/strong_zone_1m.py), on these symbols.
+    mt5_strategy_symbols: str = "EURUSD,XAUUSD,NAS100"
     # telegram.bot_chat names whose forex alerts are traded too, e.g. "main,1h"; blank = none.
     mt5_bots: str = ""
     mt5_risk_percent: float = 1.0  # of the balance, lost at the stop

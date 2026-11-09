@@ -7,9 +7,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import penny_scan
+from app.candles import Candle
 from app.db import Base
 from app.models import SentAlert
-from app.penny_scan import PennyScanResult, format_message, run_penny_live, spikes_from_quotes
+from app.penny_scan import PennyScanResult, PennySpike, format_message, run_penny_live, spikes_from_quotes
 
 CLOSE = 1793131200  # 27/10/26 16:00 New York
 NY = ZoneInfo("America/New_York")
@@ -62,15 +63,45 @@ def test_no_quotes_no_session():
 def test_caption():
     s = spikes_from_quotes([quote(price=3.31, change=56.1, volume=45_279_156, average=863_347)])[0][0]
     text = format_message(s)
-    assert text.startswith("🚀 <b>ABCD</b> · $3.31\nעלתה 56% · מחזור פי 52 מהרגיל\n")
+    assert text.startswith("🚀 <b>ABCD</b> · $3.31\n")
     assert "tradingview.com/chart/?symbol=ABCD" in text
+    assert "2️⃣ עלתה 56% ממנה (מינימום 20%)" in text
+    assert "3️⃣ מחזור פי 52 מהרגיל (מינימום פי 3)" in text
+    assert "נסחרו $149.9M (מינימום $500K)" in text
+
+
+def spike_picture(monkeypatch, candles, session):
+    """What picture draws for a stock of a usual 100 a day that traded 300."""
+    monkeypatch.setattr(penny_scan, "get_candles", lambda symbol, timeframe: candles)
+    render = Mock(return_value=b"png")
+    monkeypatch.setattr(penny_scan.alert_chart, "render", render)
+    assert penny_scan.picture(PennySpike("ABCD", "Abcd", 1.5, 50.0, 300, 3.0), session) == b"png"
+    return render.call_args.kwargs
+
+
+def test_picture_numbers_yesterdays_close_todays_candle_and_its_volume(monkeypatch):
+    yesterday = Candle(time=CLOSE - 86400, open=1, high=1.1, low=0.9, close=1, volume=100)
+    today = Candle(time=CLOSE, open=1.1, high=1.6, low=1.05, close=1.5, volume=300)
+    marks = spike_picture(monkeypatch, [yesterday, today], date(2026, 10, 27))
+    assert [price for _, price in marks["numbers"]] == [1, 1.6]
+    assert marks["level"][0] == 1
+    assert marks["volume"] == (100, 3)
+
+
+def test_picture_without_the_sessions_candle_has_no_marks(monkeypatch):
+    yesterday = Candle(time=CLOSE - 86400, open=1, high=1.1, low=0.9, close=1, volume=100)
+    today = Candle(time=CLOSE, open=1.1, high=1.6, low=1.05, close=1.5, volume=300)
+    marks = spike_picture(monkeypatch, [yesterday, today], date(2026, 10, 28))
+    assert "numbers" not in marks and "volume" not in marks
 
 
 def test_live_needs_only_a_usual_days_volume_so_far():
     q = quote(volume=600_000, average=500_000)
     assert symbols([q]) == []
     s = spikes_from_quotes([q], penny_scan.LIVE_MIN_VOLUME_RATIO)[0][0]
-    assert format_message(s, live=True).startswith("🚀 <b>ABCD</b> · $1\nעולה עכשיו 30% · מחזור עד כה פי 1.2 מיום רגיל\n")
+    text = format_message(s, live=True)
+    assert "2️⃣ עולה עכשיו 30% ממנה" in text
+    assert "3️⃣ מחזור עד כה פי 1.2 מיום רגיל (מינימום פי 1)" in text
 
 
 def at(hour, minute, day=27):

@@ -36,11 +36,12 @@ def _forex_day(ts: pd.Timestamp):
     return day - timedelta(days=1) if day.weekday() == 5 else day
 
 
-def daily_candles(hourly: pd.DataFrame) -> list[Candle]:
-    """Closed forex-day candles from 1h bars, oldest first; the day still trading is left out."""
+def daily_candles(hourly: pd.DataFrame, days: int = 14) -> list[Candle]:
+    """Closed forex-day candles from the last days of these 1h bars, oldest first; the day
+    still trading is left out."""
     if hourly is None or hourly.empty:
         return []
-    hourly = hourly[hourly.index >= hourly.index[-1] - pd.Timedelta(days=14)]
+    hourly = hourly[hourly.index >= hourly.index[-1] - pd.Timedelta(days=days)]
     day = [_forex_day(ts) for ts in hourly.index]
     today = (pd.Timestamp.now(tz=FOREX_TZ) + _DAY_ROLL).date()
     out = (

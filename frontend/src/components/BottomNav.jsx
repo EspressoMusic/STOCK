@@ -2,7 +2,7 @@ import { useNav } from "../context/NavContext";
 import { CENTER_TAB } from "../features";
 import { useLang } from "../context/LangContext";
 
-const TAB_IDS = ["chart-scan", CENTER_TAB, "interesting"];
+const TAB_IDS = ["signals", "chart-scan", CENTER_TAB, "interesting"];
 const CENTER_ID = CENTER_TAB;
 
 const LABEL_KEYS = {
@@ -10,6 +10,7 @@ const LABEL_KEYS = {
   watchlist: "nav.watchlist",
   "chart-scan": "nav.chartScan",
   interesting: "nav.interesting",
+  signals: "nav.signals",
 };
 
 const ICONS = {
@@ -20,6 +21,12 @@ const ICONS = {
     <>
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-4-4" />
+    </>
+  ),
+  signals: (
+    <>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
     </>
   ),
 };

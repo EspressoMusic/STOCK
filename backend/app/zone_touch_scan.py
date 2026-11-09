@@ -8,7 +8,7 @@ Pairs are checked after each 4h candle closes (scheduler.py) and sent from the m
 stocks from their own bot, in the same run as type 2 (tight_touch_scan.py), so the
 stocks are fetched once. The user calls them "אסטרטגיה 4" and "אסטרטגיה 4 · מניות" (the
 1h retests are "אסטרטגיה 1"). The pairs' alerts are off since 31/10/26 (code kept): the
-main bot sends daily_zone_4h.py's instead.
+main bot sends daily_zone_1h.py's instead.
 
 Zones are the chart's own (zones.py, what the trainer's automatic marking draws), so a
 symbol shows the same zone when opened on the 4h chart. The trade's direction is the

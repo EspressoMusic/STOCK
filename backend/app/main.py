@@ -4,14 +4,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -29,11 +29,11 @@ from .schemas import (
     DailyDigestIn, DailyDigestOut,
     GoogleAuthIn, AuthResultOut, UserOut,
     ZoneTrainingIn, ZoneTrainingOut,
-    RetestAlertScanOut, ZoneTouchScanOut,
+    RetestAlertScanOut, ZoneTouchScanOut, SignalOut,
 )
 from .pipeline import run_scan
 from .scheduler import start_scheduler, next_run_times
-from . import status_bot
+from . import signal_log, status_bot
 from .technical_scan import (
     scan_technical_signals, DEFAULT_TIMEFRAME, scan_ema50_breakout, scan_ema50_touch_4h,
     scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_4h, scan_stoch_extreme_daily_4h,
@@ -49,6 +49,7 @@ from .ai_summary import (
 from .enrichment import enrich_symbol
 from .retest_alerts import run_retest_alerts, get_last_result as get_last_retest_alerts
 from .zone_touch_scan import run_zone_touch_scan, get_last_result as get_last_zone_touch_scan
+from .telegram import tradingview_url
 from .world_news import get_world_news
 from . import license as license_module
 from . import paddle as paddle_module
@@ -515,6 +516,28 @@ def delete_zone_training(chart_id: int, db: Session = Depends(get_db)):
         db.delete(row)
         db.commit()
     return {"ok": True}
+
+
+@app.get("/api/signals", response_model=list[SignalOut])
+def list_signals(kind: str = Query(...), limit: int = Query(5000, ge=1, le=20000), db: Session = Depends(get_db)):
+    if kind not in signal_log.KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {', '.join(signal_log.KINDS)}")
+    return [
+        SignalOut(
+            id=r.id, kind=r.kind, symbol=r.symbol, name=r.name, direction=r.direction, strong=bool(r.strong),
+            details=r.details, has_picture=bool(r.has_picture), tradingview=tradingview_url(r.symbol),
+            created_at=r.created_at.replace(tzinfo=timezone.utc),
+        )
+        for r in signal_log.latest(db, kind, limit)
+    ]
+
+
+@app.get("/api/signals/{signal_id}/picture")
+def signal_picture(signal_id: int):
+    path = signal_log.picture_path(signal_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No picture for this signal")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
 
 @app.post("/api/scans/run", response_model=ScanOut)

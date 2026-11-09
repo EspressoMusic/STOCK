@@ -27,7 +27,11 @@ The volume rule leaves ~17 a day, no better or worse.
 A strategy alerts once a day per stock and side. Checked right after each 5m candle
 closes (scheduler.py); the trade is watched until its target or stop (trade_tracker.py).
 `python -m app.misc_strategies N` sends the last N signals of each strategy from the past
-60 days, marked as examples."""
+60 days, marked as examples.
+
+Every alert says why it was taken, so the user can correct it (their ask, 4/11/26): each
+reason is a number on the picture and the caption's line with the same number; the rules
+with no place on the chart — the volume, the stop — close the caption."""
 import logging
 import sys
 import threading
@@ -134,6 +138,8 @@ MAX_PER_RUN = 15
 SEND_INTERVAL_SECONDS = 1.1
 # The picture starts at the session's open, with at least this many candles.
 PICTURE_MIN_BARS = 30
+# The caption's numbers for the marks on the picture, the most a strategy has.
+NUMBERS = ("1️⃣", "2️⃣", "3️⃣")
 
 
 @dataclass
@@ -150,6 +156,14 @@ class Series:
 
 
 @dataclass
+class Mark:
+    """One reason for the trade: a number on the picture, a line in the caption."""
+    i: int  # the candle the number goes on
+    price: float  # next to this price, on the side of the candle it's on
+    text: str
+
+
+@dataclass
 class Signal:
     strategy: str  # a STRATEGIES id
     symbol: str
@@ -163,6 +177,10 @@ class Signal:
     candles: list[Candle] = field(default_factory=list, repr=False)  # up to the signal candle
     line: list[float] = field(default_factory=list, repr=False)  # the indicator drawn
     after: list[Candle] = field(default_factory=list, repr=False)  # an example's: the rest of its day
+    marks: list[Mark] = field(default_factory=list)  # why it was taken, in order
+    stop_rule: str = ""  # where the stop went, in the caption's words
+    rvol: float = 0.0  # the volume so far against the usual by then
+    line2: list[float] = field(default_factory=list, repr=False)  # a second indicator drawn
 
     @property
     def time(self) -> int:
@@ -238,6 +256,13 @@ def _no_earlier_entry(s: Series, first: int, i: int, direction: str) -> bool:
     return not any(is_entry_candle(s.candles[k - 1], s.candles[k], direction) for k in range(max(first, 1), i))
 
 
+def _entry_mark(s: Series, i: int, direction: str) -> Mark:
+    """The entry candle's reason (trade_plan.is_entry_candle), on the side away from its arrow."""
+    if direction == "up":
+        return Mark(i, s.candles[i].high, "נר ירוק שסגר מעל גוף הנר הקודם")
+    return Mark(i, s.candles[i].low, "נר אדום שסגר מתחת לגוף הנר הקודם")
+
+
 def orb(s: Series, i: int) -> Optional[Signal]:
     start = s.day_start[i]
     if i - start < ORB_BARS or _clock(s.candles[start].time) != SESSION_OPEN:
@@ -252,7 +277,14 @@ def orb(s: Series, i: int) -> Optional[Signal]:
     else:
         return None
     trade = plan(direction, c.close, (high + low) / 2, REWARD_RISK)
-    return trade and Signal("orb", "", direction, i, trade, level=level, level_from=start, zone=(low, high))
+    marks = [
+        Mark(start + 1, high, f"טווח 15 הדקות הראשונות: {low:g}–{high:g}"),
+        Mark(i, c.high, "הנר הראשון שסגר מעליו, ירוק") if direction == "up" else Mark(i, c.low, "הנר הראשון שסגר מתחתיו, אדום"),
+    ]
+    return trade and Signal(
+        "orb", "", direction, i, trade, level=level, level_from=start, zone=(low, high), marks=marks,
+        stop_rule="באמצע הטווח",
+    )
 
 
 def mean_reversion(s: Series, i: int) -> Optional[Signal]:
@@ -273,7 +305,12 @@ def mean_reversion(s: Series, i: int) -> Optional[Signal]:
             continue
         trade = plan(direction, c.close, _stop(s, j, i, direction), REWARD_RISK)
         if trade and (s.mean[i] >= trade.target if direction == "up" else s.mean[i] <= trade.target):
-            return Signal("mean", "", direction, i, trade)
+            up = direction == "up"
+            extreme = s.candles[j].low if up else s.candles[j].high
+            stretch = abs(extreme - s.mean[j]) / s.atr[j]
+            where = f"השפל: {stretch:.1f} ATR מתחת ל-SMA 20" if up else f"השיא: {stretch:.1f} ATR מעל SMA 20"
+            marks = [Mark(j, extreme, f"{where} (מינימום {STRETCH_ATR:g})"), _entry_mark(s, i, direction)]
+            return Signal("mean", "", direction, i, trade, marks=marks, stop_rule="מתחת לשפל" if up else "מעל השיא")
     return None
 
 
@@ -298,7 +335,14 @@ def trend_following(s: Series, i: int) -> Optional[Signal]:
     if not _no_earlier_entry(s, touched[0], i, direction):
         return None
     trade = plan(direction, c.close, _stop(s, touched[0], i, direction), REWARD_RISK)
-    return trade and Signal("trend", "", direction, i, trade)
+    up, first, k = direction == "up", i - TREND_BARS, touched[0]
+    marks = [
+        Mark(first, s.fast[first], "EMA 20 מעל EMA 50 כבר שעתיים לפחות, ו-EMA 50 עולה" if up
+             else "EMA 20 מתחת ל-EMA 50 כבר שעתיים לפחות, ו-EMA 50 יורד"),
+        Mark(k, s.candles[k].low if up else s.candles[k].high, "תיקון שנגע ב-EMA 20"),
+        _entry_mark(s, i, direction),
+    ]
+    return trade and Signal("trend", "", direction, i, trade, marks=marks, stop_rule="מתחת לתיקון" if up else "מעל התיקון")
 
 
 def liquidity_sweep(s: Series, i: int) -> Optional[Signal]:
@@ -317,7 +361,15 @@ def liquidity_sweep(s: Series, i: int) -> Optional[Signal]:
     else:
         return None
     trade = plan(direction, c.close, _stop(s, i, i, direction), REWARD_RISK)
-    return trade and Signal("sweep", "", direction, i, trade, level=level, level_from=j)
+    up = direction == "up"
+    marks = [
+        Mark(j, level, f"השפל של היום עד עכשיו: {level:g}" if up else f"השיא של היום עד עכשיו: {level:g}"),
+        Mark(i, c.high, "נר ירוק שירד ממנו בפתיל וסגר מעליו") if up else Mark(i, c.low, "נר אדום שעבר אותו בפתיל וסגר מתחתיו"),
+    ]
+    return trade and Signal(
+        "sweep", "", direction, i, trade, level=level, level_from=j, marks=marks,
+        stop_rule="מתחת לפתיל" if up else "מעל הפתיל",
+    )
 
 
 def vwap_pullback(s: Series, i: int) -> Optional[Signal]:
@@ -339,13 +391,24 @@ def vwap_pullback(s: Series, i: int) -> Optional[Signal]:
     if not touched or not is_entry_candle(prev, c, direction) or not _no_earlier_entry(s, touched[0], i, direction):
         return None
     trade = plan(direction, c.close, _stop(s, touched[0], i, direction, s.vwap[i]), REWARD_RISK)
-    return trade and Signal("vwap", "", direction, i, trade)
+    up, first, k = direction == "up", recent[0], touched[0]
+    held = above if up else 1 - above
+    side = f"{held:.0%} מ-{len(recent)} הנרות האחרונים סגרו "
+    marks = [
+        Mark(first, s.vwap[first], (side + "מעל VWAP והוא עולה" if up else side + "מתחת ל-VWAP והוא יורד") + f" (מינימום {VWAP_HELD_SHARE:.0%})"),
+        Mark(k, s.candles[k].low if up else s.candles[k].high, "חזרה ונגיעה ב-VWAP"),
+        _entry_mark(s, i, direction),
+    ]
+    return trade and Signal(
+        "vwap", "", direction, i, trade, marks=marks, stop_rule="מתחת לתיקון או ל-VWAP" if up else "מעל התיקון או ה-VWAP",
+    )
 
 
 DETECTORS: dict[str, Callable[[Series, int], Optional[Signal]]] = {
     "orb": orb, "mean": mean_reversion, "trend": trend_following, "sweep": liquidity_sweep, "vwap": vwap_pullback,
 }
 LINES = {"mean": ("mean", "SMA 20"), "trend": ("fast", "EMA 20"), "vwap": ("vwap", "VWAP")}
+LINES2 = {"trend": ("slow", "EMA 50")}
 
 
 def signals_at(s: Series, i: int, symbol: str) -> list[Signal]:
@@ -361,8 +424,11 @@ def signals_at(s: Series, i: int, symbol: str) -> list[Signal]:
             found.symbol = symbol
             found.candles = s.candles[: i + 1]
             found.session_from = s.day_start[i]
+            found.rvol = s.rvol[i]
             if strategy in LINES:
                 found.line = getattr(s, LINES[strategy][0])[: i + 1]
+            if strategy in LINES2:
+                found.line2 = getattr(s, LINES2[strategy][0])[: i + 1]
             out.append(found)
     return out
 
@@ -380,6 +446,8 @@ def history_signals(symbol: str, candles: Sequence[Candle]) -> list[Signal]:
                 found.after = alert_chart.rest_of_day(s.candles, i)
                 if found.line:
                     found.line = getattr(s, LINES[found.strategy][0])[: i + 1 + len(found.after)]
+                if found.line2:
+                    found.line2 = getattr(s, LINES2[found.strategy][0])[: i + 1 + len(found.after)]
                 out.append(found)
     return out
 
@@ -429,12 +497,20 @@ def fetch_all(symbols: Sequence[str], period: str = LIVE_PERIOD) -> dict[str, li
     return out
 
 
+def reasons(s: Signal) -> str:
+    """Why the trade was taken: a line per number on the picture, then the rules not on it."""
+    lines = [f"{NUMBERS[n]} {mark.text}" for n, mark in enumerate(s.marks)]
+    lines.append(f"📊 מחזור פי {s.rvol:.1f} מהרגיל לשעה הזו (מינימום {MIN_RVOL:g})")
+    lines.append(f"🛑 סטופ {s.stop_rule} · יעד 1:{REWARD_RISK}")
+    return "\n".join(lines)
+
+
 def format_message(s: Signal, example: bool = False) -> str:
     text = telegram.alert_caption(s.symbol, None, s.direction == "up", STRATEGIES[s.strategy])
     if example:
         when = datetime.fromtimestamp(s.time + BAR_SECONDS, ZoneInfo(settings.alert_timezone))
         text += f"\n🕘 דוגמה מההיסטוריה · {when:%d/%m %H:%M}"
-    return text
+    return f"{text}\n{reasons(s)}"
 
 
 def picture(s: Signal) -> bytes:
@@ -442,12 +518,18 @@ def picture(s: Signal) -> bytes:
     marks = dict(
         direction=s.direction, breakout=_iso(s.time), plan=s.plan,
         min_bars=max(PICTURE_MIN_BARS, s.i - s.session_from + 1), time_format="%H:%M", after=s.after,
+        numbers=[(_iso(s.candles[mark.i].time), mark.price) for mark in s.marks], lead_bars=0,
     )
     if s.line:
         marks.update(line=s.line, legend=((LINES[s.strategy][1], alert_chart.LINE),))
+    if s.line2:
+        marks.update(line2=s.line2, legend=(*marks["legend"], (LINES2[s.strategy][1], alert_chart.LINE2)))
     if s.zone:
         start = _iso(s.candles[s.level_from].time)
-        return alert_chart.render(s.candles, title, s.zone[0], s.zone[1], start, zone_colors=alert_chart.GOLD, **marks)
+        opening = (start, _iso(s.candles[s.level_from + ORB_BARS - 1].time))
+        return alert_chart.render(
+            s.candles, title, s.zone[0], s.zone[1], start, zone_colors=alert_chart.GOLD, boxes=(opening,), **marks,
+        )
     if s.level is not None:
         marks.update(level=(s.level, _iso(s.candles[s.level_from].time)))
     return alert_chart.render(s.candles, title, None, None, None, **marks)

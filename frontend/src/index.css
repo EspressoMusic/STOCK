@@ -4143,3 +4143,159 @@ html, body {
 [data-skin="mt5"] .mt5-summary-value.is-down {
   color: var(--down);
 }
+
+/* ---------- signals page (SignalsScreen) ---------- */
+.signals-tabs {
+  justify-content: center;
+}
+
+.signals-count {
+  margin: -4px 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.signals-day {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signals-day-title {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.signals-section-title {
+  margin: 8px 0 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.signals-week {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signals-week-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.signals-week-head.open {
+  border-color: var(--text-muted);
+}
+
+.signals-week-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+
+.signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface-cream);
+  border: 3px solid var(--border);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 4px 4px 0 var(--hard-shadow);
+}
+
+.signal-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signal-card-symbol {
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--text);
+  text-decoration: none;
+  direction: ltr;
+}
+
+.signal-card-symbol:hover {
+  text-decoration: underline;
+}
+
+.signal-card-time {
+  margin-inline-start: auto;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.signal-card-picture {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  cursor: zoom-in;
+}
+
+.signal-card-picture img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.signal-card-missing,
+.signal-card-details {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-line;
+}
+
+.signal-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(23, 20, 12, 0.92);
+  overflow: auto;
+  cursor: zoom-out;
+  animation: modalOverlayIn 0.18s ease;
+}
+
+.signal-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.signal-viewer-close,
+.signal-viewer-close:hover {
+  position: fixed;
+  top: 12px;
+  inset-inline-end: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 2px solid var(--border);
+}

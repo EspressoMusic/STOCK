@@ -17,13 +17,18 @@ now (the user's ask, 1/11/26): when it agrees with the trade, the alert says it'
 strong one and the stop is as above; when it doesn't, the stop is behind the visit's
 wicks only.
 
+Since 4/11/26 (the user's call) the alert only marks the zones: no entry, stop or target on
+its picture and no trade watched. A setup without a valid trade still isn't sent.
+
 A 1h close past the zone's far side ends the setup. The picture is the 4h chart beside
 the 1h one, in three colours: the daily zone blue, the 4h turn orange, the 1h
 confirmation purple. Replaces the 3-touch 4h zone alerts (zone_touch_scan.py, whose
 list stays in the trainer). Runs every hour, on the 1h candle closes (scheduler.py), and
 on demand; every 4h turn is sent once, remembered in the sent_alerts table.
 `python -m app.daily_zone_4h N` sends the last N setups of the past year, marked as
-examples — for the user to judge the strategy by."""
+examples — for the user to judge the strategy by.
+
+Off since 4/11/26 (code kept): the main bot sends daily_zone_1h.py's alerts instead."""
 import bisect
 import logging
 import sys
@@ -332,7 +337,7 @@ def format_message(s: DailyZoneSetup, example: bool = False) -> str:
 
 def render(s: DailyZoneSetup) -> bytes:
     """The 4h chart (the daily zone, the turn framed) beside the 1h one (the daily zone,
-    the 4h turn's hours framed, the confirmation and the trade)."""
+    the 4h turn's hours framed, the confirmation)."""
     zone = (s.zone_bottom, s.zone_top, None)
     title = s.name or s.symbol
     turn = int(datetime.fromisoformat(s.turn_time).timestamp())
@@ -347,23 +352,22 @@ def render(s: DailyZoneSetup) -> bytes:
         )),
         ((s.candles_1h, f"{title} · 1h", *zone), dict(
             direction=s.direction, breakout=s.time, touches=[s.touch_time] if retest and s.touch_time else [],
-            level=(s.level, s.swing_time) if retest else None, boxes=boxes_1h, min_bars=SHOWN_1H, plan=s.plan,
+            level=(s.level, s.swing_time) if retest else None, boxes=boxes_1h, min_bars=SHOWN_1H,
             zone_colors=DAILY_COLORS, arrow_color=CONFIRM_COLOR, box_color=TURN_COLOR, level_color=CONFIRM_COLOR,
-            after=s.after, time_format="%d/%m\n%H:%M",  # the trade's box leaves the candles too narrow for one line
+            after=s.after, time_format="%d/%m\n%H:%M",  # half a picture is too narrow for one line
         )),
     )
 
 
 def send_alert(s: DailyZoneSetup, example: bool = False) -> bool:
     """The 4h and 1h charts side by side with the message as their caption — or the
-    message alone if the picture can't be drawn. Its trade is watched from then on
-    (trade_tracker.py), unless it's an example from the past."""
+    message alone if the picture can't be drawn."""
     try:
         png = render(s)
     except Exception:
         logger.exception("Daily zone 4h alert: chart picture failed for %s, sending text only", s.symbol)
         png = None
-    return trade_tracker.send_alert(png, format_message(s, example), BOT, s.key, s.symbol, s.name, None if example else s.plan)
+    return trade_tracker.send_alert(png, format_message(s, example), BOT, s.key, s.symbol, s.name, None)
 
 
 def run_daily_zone_alerts(db: Session) -> int:

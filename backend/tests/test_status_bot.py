@@ -33,6 +33,25 @@ def test_done_text_counts():
     assert "נשלחו 7 התראות" in done_text(7)
 
 
+def test_a_bot_without_a_scan_says_so(monkeypatch):
+    from app import status_bot
+
+    replies = []
+    monkeypatch.setattr(status_bot.telegram, "send_message", lambda text, **kw: replies.append(text) or True)
+    status_bot._scan_now(status_bot.Bot("mt5_strategy", "token", None), "1")
+    assert replies == ["🤖 הבוט הזה בודק לבד כל 5 דקות"]
+
+
+def test_each_bots_job_is_listed(monkeypatch):
+    from app import status_bot
+
+    monkeypatch.setattr(status_bot.settings, "telegram_1h_bot_token", "a")
+    monkeypatch.setattr(status_bot.settings, "telegram_stocks_bot_token", "b")
+    monkeypatch.setattr(status_bot.settings, "telegram_nasdaq_bot_token", "c")
+    monkeypatch.setattr(status_bot.settings, "mt5_mode", "trade")
+    assert {b.job_id for b in status_bot._bots()} == set(dict(status_bot.JOBS))
+
+
 def test_second_scan_request_while_running_is_refused(monkeypatch):
     import threading
 
@@ -40,7 +59,7 @@ def test_second_scan_request_while_running_is_refused(monkeypatch):
 
     replies, release = [], threading.Event()
     monkeypatch.setattr(status_bot.telegram, "send_message", lambda text, **kw: replies.append(text) or True)
-    bot = status_bot.Bot("stock_tight_touch_alerts", "token", lambda: release.wait() and 3)
+    bot = status_bot.Bot("stock_day_alerts", "token", lambda: release.wait() and 3)
     status_bot._scan_now(bot, "1")
     status_bot._scan_now(bot, "1")
     assert any("כבר סורק" in r for r in replies)

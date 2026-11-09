@@ -1,5 +1,7 @@
+from app import daily_zone_4h, telegram, trade_tracker
 from app.candles import Candle
-from app.daily_zone_4h import Confirm, Found, confirmation, trade_for
+from app.daily_zone_4h import Confirm, DailyZoneSetup, Found, confirmation, trade_for
+from app.trade_plan import plan
 from app.zones import Zone
 
 
@@ -59,3 +61,20 @@ def test_a_strong_setups_stop_is_behind_the_zone_the_rests_behind_the_wicks():
     f = Found(ZONE, "up", 0, 0, 0, Confirm("big", 3), 1)
     assert round(trade_for(h1, f, strong=True).stop, 6) == 99.9  # the zone's bottom, 100
     assert round(trade_for(h1, f, strong=False).stop, 6) == 100.1  # the lowest wick, 100.2
+
+
+def test_the_alert_marks_the_zones_with_no_trade_drawn_or_watched(monkeypatch):
+    h1 = hours(*VISIT, (100.9, 101.8, 100.6, 101.6), (101.6, 103.5, 101.5, 103.3))
+    setup = DailyZoneSetup(
+        symbol="EURUSD=X", name="EUR/USD", direction="up", zone_bottom=100, zone_top=101, touch_count=3,
+        turn_time="1970-01-01T00:00:00+00:00", time="1970-01-01T03:00:00+00:00", key="k", kind="big",
+        candles_4h=h1[:1], candles_1h=h1, plan=plan("up", 103.3, 100),
+    )
+    charts, tracked, opened = [], [], []
+    monkeypatch.setattr(daily_zone_4h.alert_chart, "render_side_by_side", lambda *c: charts.extend(c) or b"png")
+    monkeypatch.setattr(telegram, "post_photo", lambda png, text, chat_id=None, bot_token=None: 7)
+    monkeypatch.setattr(trade_tracker, "track", lambda *args: tracked.append(args))
+    monkeypatch.setattr(trade_tracker.mt5_trader, "open_trade", lambda *args: opened.append(args))
+    assert daily_zone_4h.send_alert(setup)
+    assert len(charts) == 2 and all(kwargs.get("plan") is None for _, kwargs in charts)
+    assert tracked == [] and opened == []

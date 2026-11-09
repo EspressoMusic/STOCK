@@ -11,7 +11,11 @@ The daily list isn't scheduled since 29/10/26. Since 2/11/26 the same scan runs 
 instead (the user's pick): every 5 minutes of the session, a stock goes to the "שונות" bot
 the moment it first passes, once a day (run_penny_live). By then it has to have traded
 only its usual full day's volume (LIVE_MIN_VOLUME_RATIO) — ×3 is rarely reached before
-the afternoon."""
+the afternoon.
+
+Every alert says why the stock was picked, so the user can correct it (their ask, 4/11/26):
+yesterday's close, today's candle and its volume are numbered on the picture, and the
+caption explains each number beside the rule it passed."""
 import html
 import logging
 import sys
@@ -133,16 +137,41 @@ def scan_penny_spikes(min_volume_ratio: float = MIN_VOLUME_RATIO) -> PennyScanRe
     return PennyScanResult(scanned_at=datetime.now(timezone.utc).isoformat(), session=session, results=results)
 
 
+def _dollars(value: float) -> str:
+    return f"${value / 1e6:.1f}M" if value >= 1e6 else f"${value / 1e3:.0f}K"
+
+
 def format_message(s: PennySpike, live: bool = False) -> str:
-    move = (
-        f"עולה עכשיו {s.change_percent:.0f}% · מחזור עד כה פי {s.volume_ratio:.1f} מיום רגיל" if live
-        else f"עלתה {s.change_percent:.0f}% · מחזור פי {s.volume_ratio:.0f} מהרגיל"
+    """The stock, then why it was picked: 1-3 as numbered on the picture (picture), each
+    beside the rule it passed."""
+    move, volume, least = (
+        (f"עולה עכשיו {s.change_percent:.0f}%", f"מחזור עד כה פי {s.volume_ratio:.1f} מיום רגיל", LIVE_MIN_VOLUME_RATIO)
+        if live else (f"עלתה {s.change_percent:.0f}%", f"מחזור פי {s.volume_ratio:.0f} מהרגיל", MIN_VOLUME_RATIO)
     )
     return (
         f"🚀 <b>{html.escape(s.symbol)}</b> · ${telegram.price(s.price)}\n"
-        f"{move}\n"
-        f"{telegram.link(telegram.tradingview_url(s.symbol), 'TradingView')}"
+        f"{telegram.link(telegram.tradingview_url(s.symbol), 'TradingView')}\n"
+        f"1️⃣ סגירת אתמול (הקו)\n"
+        f"2️⃣ {move} ממנה (מינימום {MIN_CHANGE_PERCENT:.0f}%)\n"
+        f"3️⃣ {volume} (מינימום פי {least:g})\n"
+        f"💵 מתחת ל-${MAX_PRICE:g} · נסחרו {_dollars(s.price * s.volume)} (מינימום {_dollars(MIN_DOLLAR_VOLUME)})"
     )
+
+
+def picture(s: PennySpike, session: Optional[date]) -> bytes:
+    """The stock's daily chart, its reasons numbered as in the caption — if Yahoo has the
+    session's candle yet, and the one before it."""
+    candles = get_candles(s.symbol, "1d")
+    marks = {}
+    tz = ZoneInfo(settings.scan_timezone)
+    if len(candles) > 1 and datetime.fromtimestamp(candles[-1].time, tz).date() == session:
+        before, today = (datetime.fromtimestamp(c.time, timezone.utc).isoformat() for c in candles[-2:])
+        marks = dict(
+            breakout=today, level=(candles[-2].close, before),
+            numbers=((before, candles[-2].close), (today, candles[-1].high)),
+            volume=(s.volume / s.volume_ratio, 3),
+        )
+    return alert_chart.render(candles, f"{s.symbol} · 1d", None, None, None, direction="up", time_format="%d/%m", **marks)
 
 
 def send_alert(s: PennySpike, session: Optional[date], live: bool = False) -> bool:
@@ -151,16 +180,7 @@ def send_alert(s: PennySpike, session: Optional[date], live: bool = False) -> bo
     bot, chat = settings.telegram_penny_bot_token, settings.telegram_penny_chat_id or None
     text = format_message(s, live)
     try:
-        candles = get_candles(s.symbol, "1d")
-        tz = ZoneInfo(settings.scan_timezone)
-        last = candles[-1]
-        spike = (
-            datetime.fromtimestamp(last.time, timezone.utc).isoformat()
-            if datetime.fromtimestamp(last.time, tz).date() == session else None
-        )
-        png = alert_chart.render(
-            candles, f"{s.symbol} · 1d", None, None, None, direction="up", breakout=spike, time_format="%d/%m",
-        )
+        png = picture(s, session)
     except Exception:
         logger.exception("Penny scan: chart picture failed for %s, sending text only", s.symbol)
         return telegram.send_message(text, chat_id=chat, bot_token=bot)

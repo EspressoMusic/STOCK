@@ -1,35 +1,44 @@
 """The MetaTrader 5 trades that closed, each sent once to the Nasdaq bot — the user's ask
-(3/11/26): every trade taken here (ema_touch3_5m.py, and the alerts' if they trade
-again), once it hit its stop, its target or break even. A picture of its 5m candles from
-the terminal, the trade's box as it was opened, and the caption: the result, the
-symbol, long or short, entry and exit, the money made or lost.
+(3/11/26): every trade taken here (strong_zone_1m.py, ema_touch3_5m.py's still open, and
+the alerts' if they trade again), once it hit its stop, its target or break even. A picture
+of the candles its strategy trades on from the terminal, the setup it was opened on (the
+zone, its touches and the entry candle — the user's ask, 3/11/26), the trade's box as it
+was opened, and the caption: the result, the symbol, long or short, the strategy, entry and
+exit, the money made or lost.
 
 Read from the terminal's deal history — the deal that closed the position, its opening
-order's stop and target — every 5 minutes after the strategy's run (scheduler.py). The
-first run sends the ones already closed in the last LOOKBACK_DAYS too."""
+order's stop and target — after each of the strategy's runs (scheduler.py). The first run
+sends the ones already closed in the last LOOKBACK_DAYS too."""
 import html
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from . import alert_chart, ema_touch3_5m, mt5_trader, telegram
+from . import alert_chart, ema_touch3_5m, mt5_trader, strong_zone_1m, telegram
 from .candles import Candle
 from .config import settings
 from .models import SentAlert
+from .touch3_15m import find_setup
 from .trade_plan import TradePlan
 from .zone_touch_scan import send_new
+from .zones import Zone
 
 logger = logging.getLogger(__name__)
 
 BOT = "nasdaq"
-MAGICS = (ema_touch3_5m.MAGIC, mt5_trader.MAGIC)
+# The strategy's name in the messages, by magic. The alerts' trades are only the 1h bot's
+# (MT5_BOTS=1h, the user's ask, 4/11/26) — another bot there needs telling apart here.
+STRATEGIES = {strong_zone_1m.MAGIC: "אזורים חזקים + נר דקה", ema_touch3_5m.MAGIC: "EMA 50 + 3 נגיעות", mt5_trader.MAGIC: "פורקס המשך"}
+MAGICS = tuple(STRATEGIES)
 LOOKBACK_DAYS = 7
 MAX_ALERTS = 20
 BAR_SECONDS = ema_touch3_5m.BAR_SECONDS
-LEAD_BARS = 100  # candles before the entry in the picture
+WINDOW_BARS = ema_touch3_5m.WINDOW_BARS
+LEAD_BARS = WINDOW_BARS + 2  # candles fetched before the entry: the strategy's window, for its setup
+MAX_PICTURE_BARS = 400  # the whole setup and trade shown, unless longer than this
 MAX_FETCH_BARS = 5000
 MAX_OFFSET = 14 * 3600  # the broker's clock from UTC, at most
 DEAL_ENTRY_IN = 0
@@ -46,6 +55,7 @@ TITLES = {"target": "Target hit", "stop": "Stop hit", "breakeven": "Break even",
 @dataclass
 class ClosedTrade:
     position: int
+    magic: int
     symbol: str  # the broker's
     direction: str  # "up" | "down"
     entry: float
@@ -57,6 +67,7 @@ class ClosedTrade:
     reason: int
     profit: float  # with commission, swap and fees
     candles: list[Candle] = field(default_factory=list)
+    zones: list[Zone] = field(default_factory=list)  # a strong zone's trade's, as it was opened
 
     @property
     def key(self) -> str:
@@ -95,7 +106,7 @@ def closed_trades(deals: Sequence, orders: dict[int, object]) -> list[ClosedTrad
         last = max(closing, key=lambda d: d.time)
         order = orders.get(position)
         out.append(ClosedTrade(
-            position=position, symbol=opening.symbol, direction="up" if opening.type == 0 else "down",
+            position=position, magic=opening.magic, symbol=opening.symbol, direction="up" if opening.type == 0 else "down",
             entry=opening.price, exit=last.price,
             stop=(order.sl or None) if order else None, target=(order.tp or None) if order else None,
             opened=opening.time, closed=last.time, reason=last.reason,
@@ -109,6 +120,7 @@ def format_message(t: ClosedTrade) -> str:
     money = f"רווח {t.profit:.2f}$" if t.profit >= 0 else f"הפסד {-t.profit:.2f}$"
     return (
         f"{HEADS[t.outcome]} · <b>{html.escape(t.symbol)}</b> · {side}\n"
+        f"אסטרטגיה: {STRATEGIES[t.magic]}\n"
         f"כניסה {telegram.price(t.entry)} · יציאה {telegram.price(t.exit)} · {money}"
     )
 
@@ -117,36 +129,90 @@ def _iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 
+def bar_seconds(magic: int) -> int:
+    """The candles of a trade's picture: those its strategy trades on."""
+    return strong_zone_1m.BAR_SECONDS if magic == strong_zone_1m.MAGIC else BAR_SECONDS
+
+
+def setup_marks(t, candles: Sequence[Candle]) -> dict:
+    """The setup t (a ClosedTrade, or mt5_opened's OpenedTrade) was opened on, as the
+    strategy read it: the zone, its touches and the entry candle (draw()'s arguments) —
+    from the strategy's window of candles closed when it opened, read again. No zone for
+    the alerts' trades, or when those candles don't make the setup any more (the broker's
+    history changed)."""
+    marks = dict(zone_bottom=None, zone_top=None, zone_start=None)
+    closed = [c for c in candles if c.time + bar_seconds(t.magic) <= t.opened]
+    strong = t.magic == strong_zone_1m.MAGIC
+    if strong:
+        window = closed[-strong_zone_1m.HISTORY_BARS:]
+        found = strong_zone_1m.find_setup(window, t.zones) if window else None
+    elif t.magic == ema_touch3_5m.MAGIC and len(closed) >= WINDOW_BARS:
+        window = closed[-WINDOW_BARS:]
+        found = find_setup(window, ranging=False)
+    else:
+        return marks
+    if found is None or found[0] != t.direction:
+        return marks
+    _, zone, a = found
+    last = len(window) - 1
+    # A strong zone's touches are on the daily chart: here the visit's only, the zone across
+    # the picture. The entry candle gets the arrow; a touch's dot there would cover it.
+    touches = [_iso(window[k].time) for k in ([a] if strong else [*zone.touch_idx, a]) if k < last]
+    return dict(
+        zone_bottom=zone.bottom, zone_top=zone.top, zone_start=_iso(window[0].time) if strong else touches[0], touches=touches,
+        breakout=_iso(window[last].time), zone_colors=alert_chart.GOLD,
+    )
+
+
 def picture(t: ClosedTrade) -> Optional[bytes]:
-    """The 5m candles up to the one it closed in, the trade's box from the one it opened in."""
-    opened, closed = t.opened - t.opened % BAR_SECONDS, t.closed - t.closed % BAR_SECONDS
+    """The strategy's candles up to the one it closed in, its setup, the trade's box from
+    the one it opened in."""
+    seconds = bar_seconds(t.magic)
+    opened, closed = t.opened - t.opened % seconds, t.closed - t.closed % seconds
     candles = [c for c in t.candles if c.time <= closed]
     if not candles or candles[-1].time != closed or not any(c.time == opened for c in candles):
         return None
     plan = TradePlan(t.direction, t.entry, t.stop, t.target) if t.stop and t.target else None
     return alert_chart.render(
-        candles, f"{t.symbol} · 5m · {TITLES[t.outcome]}", None, None, None, direction=t.direction,
-        plan=plan, plan_from=_iso(opened), closed=t.outcome, closed_at=_iso(closed),
+        candles, f"{t.symbol} · {seconds // 60}m · {TITLES[t.outcome]}", direction=t.direction, plan=plan,
+        plan_from=_iso(opened), closed=t.outcome, closed_at=_iso(closed), max_bars=MAX_PICTURE_BARS,
+        **setup_marks(t, candles),
     )
 
 
-def send(t: ClosedTrade) -> bool:
+def send_with_picture(key: str, draw: Callable[[], Optional[bytes]], caption: str) -> bool:
+    """The caption to the Nasdaq bot, under draw()'s picture — text only without one."""
     token, chat = telegram.bot_chat(BOT)
     try:
-        png = picture(t)
+        png = draw()
     except Exception:
-        logger.exception("MT5 closed: picture failed for %s, sending text only", t.key)
+        logger.exception("MT5: picture failed for %s, sending text only", key)
         png = None
     if png is None:
-        return telegram.send_message(format_message(t), chat_id=chat, bot_token=token)
-    return telegram.send_photo(png, format_message(t), chat_id=chat, bot_token=token)
+        return telegram.send_message(caption, chat_id=chat, bot_token=token)
+    return telegram.send_photo(png, caption, chat_id=chat, bot_token=token)
 
 
-def _candles(name: str, since: int, offset: int) -> list[Candle]:
-    """The symbol's 5m candles from LEAD_BARS before since on, on the real clock (UTC)."""
+def send(t: ClosedTrade) -> bool:
+    return send_with_picture(t.key, lambda: picture(t), format_message(t))
+
+
+def broker_offset(names: Sequence[str]) -> int:
+    """The broker's clock from UTC, from its freshest quote, as the strategy reads it. A
+    weekend's stale quotes give no clock: then 0, the broker's times as they are."""
+    server = ema_touch3_5m.server_now(names)
+    offset = round(server - datetime.now(timezone.utc).timestamp()) if server else 0
+    return offset if abs(offset) <= MAX_OFFSET else 0
+
+
+def candles_from(name: str, since: int, offset: int, magic: int) -> list[Candle]:
+    """The symbol's candles for a trade of this magic, from its strategy's window before
+    since on, on the real clock (UTC)."""
     mt5 = mt5_trader.mt5
-    count = min(MAX_FETCH_BARS, int((datetime.now(timezone.utc).timestamp() + offset - since) / BAR_SECONDS) + LEAD_BARS + 2)
-    rates = mt5.copy_rates_from_pos(name, mt5.TIMEFRAME_M5, 0, count)
+    strong = magic == strong_zone_1m.MAGIC
+    lead = strong_zone_1m.HISTORY_BARS + 2 if strong else LEAD_BARS
+    count = min(MAX_FETCH_BARS, int((datetime.now(timezone.utc).timestamp() + offset - since) / bar_seconds(magic)) + lead + 2)
+    rates = mt5.copy_rates_from_pos(name, mt5.TIMEFRAME_M1 if strong else mt5.TIMEFRAME_M5, 0, count)
     if rates is None:
         return []
     return [
@@ -172,13 +238,11 @@ def report_closed(db: Session) -> int:
         trades = [t for t in trades if t.key not in already][:MAX_ALERTS]
         if not trades:
             return 0
-        # The broker's clock from its freshest quote, as the strategy reads it.
-        # A weekend's stale quotes give no clock: then the broker's times as they are.
-        server = ema_touch3_5m.server_now(sorted({t.symbol for t in trades}))
-        offset = round(server - datetime.now(timezone.utc).timestamp()) if server else 0
-        offset = offset if abs(offset) <= MAX_OFFSET else 0
+        offset = broker_offset(sorted({t.symbol for t in trades}))
         for t in trades:
-            t.candles = _candles(t.symbol, t.opened, offset)
+            t.candles = candles_from(t.symbol, t.opened, offset, t.magic)
+            if t.magic == strong_zone_1m.MAGIC:
+                t.zones = strong_zone_1m.zones_at(t.symbol, t.opened)
             t.opened, t.closed = t.opened - offset, t.closed - offset
     sent = send_new(db, trades, send, MAX_ALERTS)
     if sent:

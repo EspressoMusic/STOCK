@@ -442,6 +442,20 @@ class ZoneTrainingOut(ZoneTrainingIn):
     updated_at: datetime
 
 
+class SignalOut(BaseModel):
+    """An alert on the app's signals page (signal_log.py)."""
+    id: int
+    kind: str
+    symbol: str
+    name: Optional[str] = None
+    direction: Optional[str] = None  # "up" | "down"; None if not known
+    strong: bool
+    details: Optional[str] = None
+    has_picture: bool
+    tradingview: str
+    created_at: datetime  # when it went out, UTC
+
+
 class RetestSetupOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

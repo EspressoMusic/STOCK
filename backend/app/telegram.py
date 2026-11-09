@@ -105,7 +105,7 @@ def send_photo(png: bytes, caption: str = "", chat_id: Optional[str] = None, bot
 
 def bot_chat(bot: str) -> tuple[Optional[str], str]:
     """(token, chat id) of the bot named: "main", or a strategy's own bot — "1h",
-    "stocks", "nasdaq" or "penny" (settings.telegram_<name>_bot_token). A token of None
+    "stocks", "nasdaq", "penny", "scalp" or "ema" (settings.telegram_<name>_bot_token). A token of None
     is the main bot's; a bot's blank chat id is the main chat."""
     if bot == "main":
         return None, settings.telegram_chat_id

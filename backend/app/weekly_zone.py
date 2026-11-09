@@ -8,17 +8,19 @@ A touch is a week whose low (high) is under (over) the one on each side. Price c
 to it, and a week closes the trade's way past the body of the opposite candle before it
 (trade_plan.zone_entry: from above it's support, a long; from below, resistance, a
 short), with the Stochastic RSI (14, 14, 3) %K on that candle under 20 for a long, over
-80 for a short — the same rule as SHILO and the Nasdaq bot's model 2. In on its close;
-the stop behind the zone and the visit's wicks, 1:3, as on the other trade bots.
+80 for a short — the same rule as SHILO and the Nasdaq bot's model 2. A signal only, since
+the user turned it back on in place of the monthly 50 EMA (8/11/26): no entry, stop or target
+drawn, no trade watched (the bots' rule since 4/11/26). The 1:3 trade (in on the close, the
+stop behind the zone and the visit's wicks) only drops shorts with a target under 0.
 
 The user's LLY: the zone at ~1,100-1,150 touched on 22/6, 13/7 and 3/8/26, the week of
 14/9/26 closed green over the red body before it with %K at 6.5 — a long at ~1,153.
 On ~3.4 years of 100 big names: ~3 signals a week, longs +0.13R a trade at 1:3, shorts
 -0.33R (zones from 3 years back: +0.38R and -0.41R) — the user kept both.
 
-Checked once a week after Friday's close (scheduler.py) on ~4,500 US stocks (Nasdaq, the
-NYSE and NYSE American) and ~500 Tel Aviv ones (the user's ask, 2/11/26: a huge list); every
-signal is sent once (sent_alerts) and its trade watched (trade_tracker.py).
+Checked once a week on Sunday evening in Israel, before the week's trading opens
+(scheduler.py), on ~4,500 US stocks (Nasdaq, the NYSE and NYSE American) and ~500 Tel Aviv
+ones (the user's ask, 2/11/26: a huge list); every signal is sent once (sent_alerts).
 `python -m app.weekly_zone N` sends the last N signals of the big names, marked as
 examples."""
 import logging
@@ -68,6 +70,12 @@ TASE_MIN_VOLUME = 1_000
 MAX_ALERTS = 60
 PICTURE_BARS = 60
 AFTER_BARS = 40  # an example's weeks shown after its entry
+# The picture, near today (the user's ask, 8/11/26): the zone's half year of weeks and about
+# three months of days, and an example's weeks and days after its entry.
+WEEK_BARS = 34
+DAY_BARS = 65
+AFTER_WEEKS = 8
+AFTER_DAYS = 15
 
 
 @dataclass
@@ -172,6 +180,17 @@ def fetch(symbol: str, period: str = HISTORY_PERIOD) -> list[Candle]:
     return candles if candles and week_closed(candles[-1], time.time()) else candles[:-1]
 
 
+def fetch_days(symbol: str) -> list[Candle]:
+    """The symbol's last year of days, for the picture; none if Yahoo has none."""
+    _stock_fetch_limiter.wait()
+    try:
+        df = yf.Ticker(symbol).history(interval="1d", period="1y")
+    except Exception:
+        logger.warning("Weekly zone: daily history fetch failed for %s", symbol)
+        return []
+    return _to_candles(df.dropna()) if df is not None and not df.empty else []
+
+
 def _evaluate(symbol: str, name: Optional[str]) -> Optional[Signal]:
     """The signal on the last closed week, if it's from the week just ended."""
     candles = fetch(symbol)
@@ -220,13 +239,32 @@ def format_message(s: Signal, example: bool = False) -> str:
 
 
 def picture(s: Signal) -> bytes:
-    """The zone and its touches, the entry week's arrow, the trade and the Stochastic RSI
-    under the candles — as on the user's picture."""
-    return alert_chart.render(
-        s.candles, f"{s.symbol} · 1W", s.zone_bottom, s.zone_top, s.touch_times[0],
-        direction=s.direction, breakout=_iso(s.time), touches=s.touch_times, plan=s.plan,
-        stoch=(s.k, s.d), time_format="%m/%y", min_bars=PICTURE_BARS, after=s.after[:AFTER_BARS],
+    """The weeks beside the days (the user's ask, 8/11/26), near today: on the weeks the zone
+    and its touches, the entry week's arrow and the Stochastic RSI under them — as on the
+    user's picture, without its trade; on the days the zone, the entry week's days framed and
+    the arrow on its last. The weeks alone if the days can't be had."""
+    weeks = (
+        (s.candles, f"{s.symbol} · 1W", s.zone_bottom, s.zone_top, s.touch_times[0]),
+        dict(
+            direction=s.direction, breakout=_iso(s.time), touches=s.touch_times, stoch=(s.k, s.d),
+            time_format="%d/%m", min_bars=WEEK_BARS, max_bars=WEEK_BARS, after=s.after[:AFTER_WEEKS],
+        ),
     )
+    end = s.time + WEEK
+    days, later = [], []
+    for c in fetch_days(s.symbol):
+        (days if c.time < end else later).append(c)
+    week_days = [c for c in days if c.time >= s.time]
+    if not week_days:
+        return alert_chart.render(*weeks[0], **weeks[1])
+    first, last = _iso(week_days[0].time), _iso(week_days[-1].time)
+    return alert_chart.render_side_by_side(weeks, (
+        (days, f"{s.symbol} · 1D", s.zone_bottom, s.zone_top, None),
+        dict(
+            direction=s.direction, breakout=last, boxes=[(first, last)],
+            time_format="%d/%m", min_bars=DAY_BARS, max_bars=DAY_BARS, after=later[:AFTER_DAYS],
+        ),
+    ), divider=True)
 
 
 def send_alert(s: Signal, example: bool = False) -> bool:
@@ -235,7 +273,7 @@ def send_alert(s: Signal, example: bool = False) -> bool:
     except Exception:
         logger.exception("Weekly zone: chart picture failed for %s, sending text only", s.key)
         png = None
-    return trade_tracker.send_alert(png, format_message(s, example), BOT, s.key, s.symbol, None, None if example else s.plan)
+    return trade_tracker.send_alert(png, format_message(s, example), BOT, s.key, s.symbol, None, None)
 
 
 def run_weekly_zone(db: Session) -> int:

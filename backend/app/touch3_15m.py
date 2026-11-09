@@ -15,7 +15,15 @@ zone and an as strong one close by (is_ranging).
 
 Runs every 15 minutes, on the candle closes (scheduler.py), and on demand; every setup is
 sent once, remembered in the sent_alerts table. `python -m app.touch3_15m N` sends the
-last N setups of the past 60 days, marked as examples — for the user to judge it by."""
+last N setups of the past 60 days, marked as examples — for the user to judge it by.
+
+Since 4/11/26 each alert's trade is opened on MetaTrader 5 too (MT5_BOTS=1h, the user's
+ask; mt5_trader.py), at the stop these candles (Yahoo's) gave, its target 1:2 from the fill
+(mt5_trader.REWARD_RISK, the user's ask, 4/11/26), not this plan's 1:3.
+
+Since 4/11/26 (the user's call) the setups only trade, with no alert (run_touch3_trades):
+the 1h bot's alerts are stocks now (stock_day.py). The Nasdaq bot still reports each trade
+(mt5_opened.py, mt5_closed.py)."""
 import logging
 import sys
 import threading
@@ -30,7 +38,7 @@ import pandas as pd
 import yfinance as yf
 from sqlalchemy.orm import Session
 
-from . import alert_chart, telegram, trade_tracker
+from . import alert_chart, mt5_trader, telegram, trade_tracker
 from .candles import Candle, _to_candles
 from .config import settings
 from .daily_candle import _forex_day, confirms, daily_candles
@@ -276,6 +284,23 @@ def run_touch3_alerts(db: Session) -> int:
         sent = send_new(db, found, send_alert, len(found))
         logger.info("Third touch 15m alerts: %d setups in %d pairs, %d sent", len(found), len(UNIVERSE), sent)
         return sent
+
+
+def _trade(s: TouchSetup) -> bool:
+    """Opens the setup's trade. Counted as taken whatever happens there: a later try would
+    enter late, as a failed order on an alert never tried again either."""
+    mt5_trader.open_trade(BOT, s.symbol, s.plan)
+    return True
+
+
+def run_touch3_trades(db: Session) -> int:
+    """Scans the 15m candle that just closed and trades each new setup, with no alert;
+    returns how many were new."""
+    with _run_lock:
+        found = scan()
+        taken = send_new(db, found, _trade, len(found))
+        logger.info("Third touch 15m trades: %d setups in %d pairs, %d new", len(found), len(UNIVERSE), taken)
+        return taken
 
 
 if __name__ == "__main__":

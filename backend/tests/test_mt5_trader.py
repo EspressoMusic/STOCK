@@ -15,6 +15,7 @@ class FakeMT5:
     EURUSD at 1.1000/1.1001 — 100,000 units a lot."""
 
     ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
+    POSITION_TYPE_BUY, POSITION_TYPE_SELL = 0, 1
     ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
     TRADE_ACTION_DEAL, TRADE_ACTION_SLTP, ORDER_TIME_GTC = 1, 6, 0
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
@@ -50,7 +51,7 @@ class FakeMT5:
         return True
 
     def positions_get(self, symbol=None):
-        return [p for p in self.positions if p.symbol == symbol]
+        return [p for p in self.positions if symbol is None or p.symbol == symbol]
 
     def symbol_info_tick(self, name):
         return SimpleNamespace(bid=1.1000, ask=1.1001)
@@ -100,8 +101,8 @@ def test_opens_a_long_sized_by_the_risk(fake):
     # 0.5% of 10,000 = 50; one lot loses (1.1001 - 1.0950) * 100,000 = 510 at the stop.
     assert req["volume"] == 0.09
     assert req["type"] == fake.ORDER_TYPE_BUY and req["price"] == 1.1001
-    # The plan's 1:3 from the ask it's bought at: 1.1001 + 3 * (1.1001 - 1.0950).
-    assert (req["sl"], req["tp"]) == (1.095, 1.1154)
+    # 1:2 from the ask it's bought at, though the plan says 1:3: 1.1001 + 2 * (1.1001 - 1.0950).
+    assert (req["sl"], req["tp"]) == (1.095, 1.1103)
     assert req["magic"] == mt5_trader.MAGIC and req["type_filling"] == fake.ORDER_FILLING_IOC
 
 
@@ -114,8 +115,22 @@ def test_the_target_from_the_fill_when_it_isnt_the_quote(fake):
     fake.slippage = -0.0003  # bought 3 pips under the ask
     mt5_trader.open_trade("1h", "EURUSD=X", LONG)
     order, moved = fake.sent
-    assert order["tp"] == 1.1154 and moved["action"] == fake.TRADE_ACTION_SLTP and moved["position"] == 777
-    assert (moved["sl"], moved["tp"]) == (1.095, 1.1142)  # 1.0998 + 3 * (1.0998 - 1.0950)
+    assert order["tp"] == 1.1103 and moved["action"] == fake.TRADE_ACTION_SLTP and moved["position"] == 777
+    assert (moved["sl"], moved["tp"]) == (1.095, 1.1094)  # 1.0998 + 2 * (1.0998 - 1.0950)
+
+
+def test_skipped_past_the_1_to_2_target_though_short_of_the_plans(fake):
+    # The ask, 1.1001, is past 1:2 (1.1000), not past the plan's 1:3 (1.1010).
+    assert mt5_trader.open_trade("1h", "EURUSD=X", TradePlan("up", entry=1.0980, stop=1.0970, target=1.1010)) is None
+    assert fake.sent == []
+
+
+def test_a_strategys_own_ratio_from_the_fill(fake):
+    fake.slippage = -0.0003  # bought 3 pips under the ask
+    assert mt5_trader.place("EURUSD", LONG, 30313, "c", 3) == 777
+    order, moved = fake.sent
+    assert order["tp"] == 1.1154  # 1.1001 + 3 * (1.1001 - 1.0950)
+    assert moved["tp"] == 1.1142  # 1.0998 + 3 * (1.0998 - 1.0950)
 
 
 def test_finds_the_brokers_symbol_name(fake):
@@ -139,10 +154,44 @@ def test_not_a_real_account_unless_allowed(fake, monkeypatch):
 
 
 def test_one_trade_per_pair(fake):
-    fake.positions = [SimpleNamespace(symbol="EURUSD", magic=mt5_trader.MAGIC)]
+    fake.positions = [SimpleNamespace(symbol="EURUSD", magic=mt5_trader.MAGIC, type=0, ticket=1)]
     assert mt5_trader.open_trade("1h", "EURUSD=X", LONG) is None
-    fake.positions = [SimpleNamespace(symbol="EURUSD", magic=0)]  # one opened by hand
+    fake.positions = [SimpleNamespace(symbol="EURUSD", magic=0, type=0, ticket=1)]  # one opened by hand
     assert mt5_trader.open_trade("1h", "EURUSD=X", LONG) == 777
+
+
+def test_legs():
+    assert mt5_trader.legs("EURUSD", True) == {"EUR": 1, "USD": -1}
+    assert mt5_trader.legs("usdchf.m", False) == {"USD": -1, "CHF": 1}  # the broker's own spelling
+    assert mt5_trader.legs("NAS100", True) == {}
+
+
+@pytest.mark.parametrize("held, held_type, symbol, plan, opened", [
+    ("EURUSD", 0, "USDCHF=X", LONG, False),  # the user's: long EUR/short USD, then long USD
+    ("audusd", 0, "USDCHF=X", LONG, False),  # as the broker writes it
+    ("EURUSD", 1, "USDCHF=X", SHORT, False),  # the same, both sides swapped
+    ("EURUSD", 0, "GBPUSD=X", SHORT, False),  # long USD against short USD, the USD second
+    ("EURAUD", 0, "AUDUSD=X", LONG, False),  # short AUD, then long AUD
+    ("XAUUSD", 0, "USDJPY=X", LONG, False),  # gold's a short on the dollar too
+    ("EURUSD", 0, "EURUSD=X", SHORT, False),  # the other strategy's, on the same pair
+    ("EURUSD", 0, "USDCHF=X", SHORT, True),  # both short USD: not against each other
+    ("EURUSD", 0, "GBPUSD=X", LONG, True),
+    ("EURUSD", 0, "GBPJPY=X", LONG, True),  # no currency in common
+    ("NAS100", 1, "USDCHF=X", LONG, True),  # not a pair
+])
+def test_no_trade_against_an_open_one(fake, held, held_type, symbol, plan, opened):
+    fake.names = ("EURUSD", "GBPUSD", "USDCHF", "AUDUSD", "USDJPY", "GBPJPY")
+    fake.positions = [SimpleNamespace(symbol=held, magic=mt5_trader.MAGIC + 1, type=held_type, ticket=5)]
+    assert (mt5_trader.open_trade("1h", symbol, plan) == 777) is opened
+    assert bool(fake.sent) is opened
+
+
+def test_trades_again_once_the_opposite_one_closed(fake):
+    fake.names = ("USDCHF",)
+    fake.positions = [SimpleNamespace(symbol="EURUSD", magic=mt5_trader.MAGIC, type=0, ticket=5)]
+    assert mt5_trader.open_trade("1h", "USDCHF=X", LONG) is None
+    fake.positions = []
+    assert mt5_trader.open_trade("1h", "USDCHF=X", LONG) == 777
 
 
 def test_only_the_set_bots_forex_pairs_and_modes(fake, monkeypatch):

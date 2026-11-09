@@ -1,3 +1,5 @@
+import pytest
+
 from app import touch3_15m
 from app.candles import Candle
 from app.touch3_15m import find_setup, setup_from, side_zones
@@ -114,3 +116,14 @@ def test_only_when_the_daily_candle_agrees(monkeypatch):
     assert s.direction == "up" and s.plan.entry == 102.3 and s.plan.stop < 100
     assert s.plan.target - s.plan.entry == 3 * (s.plan.entry - s.plan.stop)
     assert len(s.touch_times) == 3  # the two touches, then the visit's first candle
+
+
+def test_the_setups_trade_with_no_alert(monkeypatch):
+    setup = touch3_15m.TouchSetup("EURUSD=X", "EUR/USD", "up", 100, 101, [], "2026-11-04T10:00:00+00:00", plan="the plan")
+    opened = []
+    monkeypatch.setattr(touch3_15m, "scan", lambda: [setup])
+    monkeypatch.setattr(touch3_15m.mt5_trader, "open_trade", lambda *a: opened.append(a))
+    monkeypatch.setattr(touch3_15m.trade_tracker, "send_alert", lambda *a: pytest.fail("no alert"))
+    monkeypatch.setattr(touch3_15m, "send_new", lambda db, found, send, n: sum(send(s) for s in found))
+    assert touch3_15m.run_touch3_trades(None) == 1
+    assert opened == [("1h", "EURUSD=X", "the plan")]

@@ -128,6 +128,23 @@ class SentAlert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SignalLog(Base):
+    """An alert of the weekly stocks, stock day trading or forex bot, as it went out — for
+    the app's signals page (signal_log.py). Its chart picture is a file named after the id."""
+    __tablename__ = "signal_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False, index=True)  # the alert's (SentAlert.key)
+    kind = Column(String, nullable=False, index=True)  # signal_log.KINDS
+    symbol = Column(String, nullable=False)
+    name = Column(String)  # as the alert shows it; None = the symbol
+    direction = Column(String)  # "up" = long | "down" = short; None if not known
+    strong = Column(Integer, default=0, nullable=False)  # the caption's "💪"
+    details = Column(Text)  # the caption's lines under the TradingView link, e.g. stock day's reasons
+    has_picture = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class TrackedTrade(Base):
     """An alert's trade (trade_plan.py), watched until price reaches its target or its
     stop — then the alert's bot replies to the alert with the outcome (trade_tracker.py)."""

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -47,10 +48,16 @@ MAX_BARS = 160
 # its labels fit whatever the zoom.
 PLAN_SHARE = 1 / 6
 PLAN_MIN_BARS = 14
+# The numbers marking why a trade was taken (draw's numbers), and the second line's colour.
+NUMBER = "#7c3aed"
+LINE2 = "#2563eb"
 # The Stochastic RSI panel under the candles: its lines, its oversold / overbought levels.
 STOCH_K = "#2962ff"
 STOCH_D = "#ff6d00"
 STOCH_LEVELS = (20, 80)
+# The thick line between charts side by side, when asked for, and the room left for it.
+DIVIDER_WIDTH = 6
+DIVIDER_PAD = 4
 
 
 def rest_of_day(candles: Sequence[Candle], i: int) -> list[Candle]:
@@ -71,6 +78,29 @@ def _index(candles: Sequence[Candle], iso: str) -> Optional[int]:
     return next((i for i, c in enumerate(candles) if c.time == ts), None)
 
 
+def _number(ax, number: int, x: int, y: float, below: bool) -> None:
+    """A numbered circle just under or over the price y on candle x, whatever the zoom."""
+    ax.annotate(
+        str(number), xy=(x, y), xytext=(0, -13 if below else 13), textcoords="offset points", ha="center", va="center",
+        fontsize=9, fontweight="bold", color="white", zorder=7,
+        bbox=dict(boxstyle="circle,pad=0.25", facecolor=NUMBER, edgecolor="white", linewidth=0.8),
+    )
+
+
+def _panel(ax):
+    """A panel under ax, with the time axis moved down to it."""
+    panel = make_axes_locatable(ax).append_axes("bottom", size="28%", pad=0.15, sharex=ax)
+    ax.tick_params(labelbottom=False)
+    panel.set_facecolor("white")
+    for side in ("top", "left"):
+        panel.spines[side].set_visible(False)
+    for side in ("right", "bottom"):
+        panel.spines[side].set_color(GRID)
+    panel.yaxis.tick_right()
+    panel.tick_params(colors=TEXT, labelsize=8, length=0)
+    return panel
+
+
 def draw(
     ax,
     candles: Sequence[Candle],
@@ -85,6 +115,7 @@ def draw(
     line: Sequence[float] = (),
     extra_zones: Sequence[tuple[float, float]] = (),
     time_format: str = "%d/%m %H:%M",
+    time_labels: int = 8,
     min_bars: int = MIN_BARS,
     plan: Optional[TradePlan] = None,
     zone_colors: tuple = (ZONE_FILL, ZONE_LINE),
@@ -100,14 +131,20 @@ def draw(
     level_color: str = TOUCH,
     legend: Sequence[tuple[str, object]] = (),
     after: Sequence[Candle] = (),
+    max_bars: int = MAX_BARS,
+    numbers: Sequence[tuple[str, float]] = (),
+    line2: Sequence[float] = (),
+    volume: Optional[tuple[float, int]] = None,
+    lead_bars: int = LEAD_BARS,
 ) -> None:
     """The alert's chart, onto ax. The times are the alert's own ISO candle times; the
     zone is drawn from zone_start (or the left edge, if that's further back) onward, if
     there is one. line is an indicator (the EMA) aligned with candles. extra_zones are
     more (bottom, top) zones, drawn across the whole chart and always kept in view.
-    time_format labels the time axis ("%d/%m" for daily candles); min_bars is the fewest
-    candles shown, fewer for a setup a few days long. plan is the trade, entered on the
-    last candle, or on plan_from's; closed ("target" | "stop") is the level the last
+    time_format labels the time axis ("%d/%m" for daily candles), with about time_labels
+    labels; min_bars is the fewest candles shown, fewer for a setup a few days long. plan
+    is the trade, entered on the last candle, or on plan_from's; closed
+    ("target" | "stop") is the level the last
     candle reached — or closed_at's, the candles after it showing where price went on;
     plan_labels=False draws its boxes without the price labels. zone_colors
     are the zone's (fill, edges), GOLD for gold. stoch is the Stochastic RSI's (%K, %D),
@@ -116,7 +153,13 @@ def draw(
     is a (price, from time) line in level_color; legend is (label, color) entries. after
     are the candles that came after the last one, for an example from the past: shown right
     of it, the plan's trade entered on that last candle and closed on the first of them that
-    reached its target or stop, if one did; line and stoch may run on over them."""
+    reached its target or stop, if one did; line and stoch may run on over them. max_bars
+    is the most candles shown, more for a long trade drawn with its whole setup. numbers
+    are (candle time, price) marks numbered from 1, the reasons the caption explains: each
+    goes on the side of its candle the price is on. line2 is a second indicator, in LINE2.
+    volume is (a usual day's volume, the last candle's number): a volume panel under the
+    candles, the usual day dashed and the last candle's bar numbered. lead_bars are the
+    candles shown before the first marked one."""
     end = len(candles)  # the view is framed on the candles up to here, after added on the right
     if after:
         entry = candles[-1]
@@ -125,10 +168,11 @@ def draw(
         plan_from = plan_from or datetime.fromtimestamp(entry.time, timezone.utc).isoformat()
         if hit:
             closed, closed_at = hit[0], datetime.fromtimestamp(hit[1], timezone.utc).isoformat()
-    times = [breakout, *retests, *touches, plan_from, *(t for box in boxes for t in box), level[1] if level else None]
+    times = [breakout, *retests, *touches, plan_from, *(t for box in boxes for t in box), level[1] if level else None,
+             *(t for t, _ in numbers)]
     marks = [i for i in (_index(candles, t) for t in times if t) if i is not None]
     first = min(marks) if marks else end
-    lo = max(0, min(first - LEAD_BARS, end - min_bars), end - MAX_BARS)
+    lo = max(0, min(first - lead_bars, end - min_bars), end - max_bars)
     shown = list(candles[lo:])
     n = len(shown)
 
@@ -168,6 +212,8 @@ def draw(
         draw_zone(0, bottom, top)
     if line:
         ax.plot(range(len(line) - lo), line[lo:], color=LINE, linewidth=1.3, zorder=4)
+    if line2:
+        ax.plot(range(len(line2) - lo), line2[lo:], color=LINE2, linewidth=1.3, zorder=4)
     for first_t, last_t in boxes:
         x1, x2 = at(first_t), at(last_t)
         if x1 is None or x2 is None:
@@ -198,9 +244,10 @@ def draw(
     if b is not None:
         c = shown[b]
         up = direction != "down"
+        # Over the trade's labels: a stop just past the entry candle puts its label on it.
         ax.scatter(
             [b], [c.low - gap if up else c.high + gap], marker="^" if up else "v",
-            s=90, color=arrow_color, zorder=5, edgecolors="white", linewidths=0.8,
+            s=90, color=arrow_color, zorder=6.5, edgecolors="white", linewidths=0.8,
         )
     for t in [*retests, *touches]:
         x = at(t)
@@ -213,6 +260,15 @@ def draw(
             [x], [c.low - gap if abs(c.low - mid) < abs(c.high - mid) else c.high + gap], marker="o",
             s=55, color=TOUCH, zorder=5, edgecolors="white", linewidths=0.8,
         )
+
+    for number, (t, price) in enumerate(numbers, 1):
+        x = at(t)
+        if x is None:
+            continue
+        below = price <= (shown[x].high + shown[x].low) / 2
+        # Past the arrow, when it's on the arrow's side of the entry candle.
+        past = 2 * gap if x == b and below == (direction != "down") else 0
+        _number(ax, number, x, price - past if below else price + past, below)
 
     if plan:
         mid = x0 + plan_bars / 2
@@ -253,7 +309,7 @@ def draw(
         )
 
     tz = ZoneInfo(settings.alert_timezone)
-    step = max(1, n // 8)
+    step = max(1, n // time_labels)
     ticks = list(range(0, n, step))
     ax.set_xticks(ticks)
     ax.set_xticklabels([datetime.fromtimestamp(shown[i].time, tz).strftime(time_format) for i in ticks])
@@ -270,16 +326,7 @@ def draw(
         )
 
     if stoch:
-        # The time axis moves to the panel, which shares it.
-        osc = make_axes_locatable(ax).append_axes("bottom", size="28%", pad=0.15, sharex=ax)
-        ax.tick_params(labelbottom=False)
-        osc.set_facecolor("white")
-        for side in ("top", "left"):
-            osc.spines[side].set_visible(False)
-        for side in ("right", "bottom"):
-            osc.spines[side].set_color(GRID)
-        osc.yaxis.tick_right()
-        osc.tick_params(colors=TEXT, labelsize=8, length=0)
+        osc = _panel(ax)
         osc.axhspan(*STOCH_LEVELS, color=GRID, alpha=0.6, zorder=0)
         for level in STOCH_LEVELS:
             osc.axhline(level, color=TEXT, linewidth=0.6, linestyle="--", alpha=0.5, zorder=1)
@@ -290,13 +337,36 @@ def draw(
         osc.set_yticks(STOCH_LEVELS)
         osc.text(0.005, 0.95, "Stoch RSI 14 14 3 3", transform=osc.transAxes, fontsize=8, color=TEXT, va="top")
 
+    if volume:
+        usual, number = volume
+        vol = _panel(ax)
+        bars = [c.volume or 0 for c in shown]
+        vol.bar(range(n), bars, width=width, color=[to_rgba(UP if c.close >= c.open else DOWN, 0.45) for c in shown], zorder=2)
+        vol.bar(n - 1, bars[-1], width=width, color=NUMBER, zorder=3)
+        vol.axhline(usual, color=TEXT, linewidth=0.9, linestyle="--", zorder=4)
+        vol.set_ylim(0, max(*bars, usual) * 1.4)
+        vol.set_yticks([])
+        _number(vol, number, n - 1, bars[-1], False)
+        vol.text(0.005, 0.95, "Volume (dashed: a usual day)", transform=vol.transAxes, fontsize=8, color=TEXT, va="top")
 
-def _png(panels: Sequence[tuple[tuple, dict]], size: tuple[float, float]) -> bytes:
+
+def _png(
+    panels: Sequence[tuple[tuple, dict]], size: tuple[float, float], divider: bool = False,
+    widths: Optional[Sequence[float]] = None,
+) -> bytes:
     fig = Figure(figsize=size, dpi=110, facecolor="white")
     FigureCanvasAgg(fig)
-    for i, (args, kwargs) in enumerate(panels):
-        draw(fig.add_subplot(1, len(panels), i + 1), *args, **kwargs)
-    fig.tight_layout()
+    grid = fig.add_gridspec(1, len(panels), width_ratios=widths)
+    axes = [fig.add_subplot(grid[0, i]) for i in range(len(panels))]
+    for ax, (args, kwargs) in zip(axes, panels):
+        draw(ax, *args, **kwargs)
+    fig.tight_layout(w_pad=DIVIDER_PAD if divider else None)
+    if divider:
+        renderer = fig.canvas.get_renderer()
+        for left, right in zip(axes, axes[1:]):
+            # Halfway between one chart's price labels and the next chart.
+            x = (left.get_tightbbox(renderer).x1 + right.get_tightbbox(renderer).x0) / 2 / fig.bbox.width
+            fig.add_artist(Line2D([x, x], [0, 1], color="black", linewidth=DIVIDER_WIDTH, transform=fig.transFigure))
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     return buf.getvalue()
@@ -307,7 +377,11 @@ def render(*args, **kwargs) -> bytes:
     return _png([(args, kwargs)], (10, 5.6))
 
 
-def render_side_by_side(left: tuple[tuple, dict], right: tuple[tuple, dict]) -> bytes:
-    """PNG of two charts side by side, each draw()'s (arguments, keyword arguments)
-    without ax — one setup on two timeframes."""
-    return _png([left, right], (16, 6))
+def render_side_by_side(
+    *charts: tuple[tuple, dict], size: tuple[float, float] = (16, 6), divider: bool = False,
+    widths: Optional[Sequence[float]] = None,
+) -> bytes:
+    """PNG of charts side by side, each draw()'s (arguments, keyword arguments) without
+    ax — one setup on a few timeframes. divider draws a thick black line between them;
+    widths are the charts' relative widths, equal if not given."""
+    return _png(charts, size, divider, widths)

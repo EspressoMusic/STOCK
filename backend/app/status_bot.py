@@ -14,12 +14,10 @@ from zoneinfo import ZoneInfo
 
 from . import symbol_analysis, telegram
 from .config import settings
-from .daily_zone_4h import run_daily_zone_alerts
+from .daily_zone_1h import run_daily_zone_alerts
 from .db import SessionLocal
-from .misc_strategies import run_misc_strategies
-from .monthly_zone import run_monthly_zone
 from .scheduler import scheduler
-from .touch3_15m import run_touch3_alerts
+from .stock_day import run_stock_day
 from .weekly_zone import run_weekly_zone
 
 logger = logging.getLogger(__name__)
@@ -31,12 +29,10 @@ MAX_AGE_SECONDS = 60
 SCAN_WORDS = {"סריקה", "סרוק", "scan"}
 
 JOBS = (
-    ("touch3_15m_alerts", "פורקס 15m (המשך)"),
-    ("daily_zone_alerts", "פורקס 4h"),
-    ("stock_tight_touch_alerts", "מניות 4h"),
-    ("misc_strategies_alerts", "שונות (מניות 5m)"),
     ("weekly_zone_alerts", "מניות שבועי"),
-    ("monthly_zone_alerts", "מניות חודשי"),
+    ("stock_day_alerts", "מניות מסחר יומי"),
+    ("mt5_strategy", "MT5"),
+    ("daily_zone_alerts", "פורקס"),
 )
 DAYS = ("שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון")  # datetime.weekday() order
 
@@ -45,7 +41,7 @@ DAYS = ("שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"
 class Bot:
     job_id: str  # the scheduler job it alerts for (JOBS)
     token: Optional[str]  # None = the main bot
-    scan: Callable[[], int]  # runs the scan and sends its alerts; returns how many were sent
+    scan: Optional[Callable[[], int]]  # runs the scan, sends its alerts; how many were sent. None: on its own only
     busy: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -90,19 +86,15 @@ def _with_db(run: Callable) -> Callable[[], int]:
 
 
 def _bots() -> list[Bot]:
-    """Each bot scans what it alerts for; the "שונות" and stocks bots only if they have
-    their own. The stocks bot's is the weekly zone since 2/11/26, in place of SHILO (its 4h
-    types are off since 30/10/26); the Nasdaq bot's the monthly zone since 2/11/26.
-    The 1h bot ("פורקס המשך")'s is the 15m third touch since 2/11/26."""
+    """The running bots, one strategy each (scheduler.py) — the others don't answer or scan.
+    MetaTrader 5's has no scan on demand: it places real orders, on each 5m candle's close."""
     bots = [Bot("daily_zone_alerts", None, _with_db(run_daily_zone_alerts))]
     if settings.telegram_1h_bot_token:
-        bots.append(Bot("touch3_15m_alerts", settings.telegram_1h_bot_token, _with_db(run_touch3_alerts)))
-    if settings.telegram_penny_bot_token:
-        bots.append(Bot("misc_strategies_alerts", settings.telegram_penny_bot_token, _with_db(run_misc_strategies)))
+        bots.append(Bot("stock_day_alerts", settings.telegram_1h_bot_token, _with_db(run_stock_day)))
     if settings.telegram_stocks_bot_token:
         bots.append(Bot("weekly_zone_alerts", settings.telegram_stocks_bot_token, _with_db(run_weekly_zone)))
-    if settings.telegram_nasdaq_bot_token:
-        bots.append(Bot("monthly_zone_alerts", settings.telegram_nasdaq_bot_token, _with_db(run_monthly_zone)))
+    if settings.telegram_nasdaq_bot_token and settings.mt5_mode != "off":
+        bots.append(Bot("mt5_strategy", settings.telegram_nasdaq_bot_token, None))
     return bots
 
 
@@ -112,6 +104,9 @@ def _scan_now(bot: Bot, chat_id: str):
     def reply(text: str):
         telegram.send_message(text, chat_id=chat_id, bot_token=bot.token)
 
+    if bot.scan is None:
+        reply("🤖 הבוט הזה בודק לבד כל 5 דקות")
+        return
     if not bot.busy.acquire(blocking=False):
         reply("⏳ כבר סורק — אודיע כשאסיים")
         return

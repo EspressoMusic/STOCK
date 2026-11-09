@@ -138,6 +138,15 @@ export function getCandles(symbol, timeframe = "1h") {
   return request(`/api/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
 }
 
+// The bots' alerts as they went out (backend signal_log.py); kind = weekly | day | forex.
+export function getSignals(kind) {
+  return request(`/api/signals?kind=${kind}`);
+}
+
+export function signalPictureUrl(id) {
+  return `${API_BASE}/api/signals/${id}/picture`;
+}
+
 // Zone trainer charts (trainer.html). Marks (see lib/zoneTraining.js) and candles are
 // camelCase objects here; on the wire marks are snake_case and candles are
 // [time, open, high, low, close] rows.

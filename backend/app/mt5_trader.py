@@ -3,16 +3,20 @@ order code of their BOT MO project (botmo/live/mt5_bot.py's Broker).
 
 The terminal must be installed, open and logged in on this computer: the MetaTrader5
 package (Windows only) talks to it. Every alert of a bot in MT5_BOTS on a forex pair that
-goes out with its trade (trade_tracker.send_alert) is a market order there, the alert's
-stop and target with it — the broker closes it, nothing more to watch. Since the same
-day the alerts' bots are off here (MT5_BOTS blank, the user's pick): the strategy that
-trades is ema_touch3_5m.py's, through place and move_stop.
+goes out with its trade (trade_tracker.send_alert) is a market order there, at the alert's
+stop — the broker closes it, nothing more to watch. Since 4/11/26 that's the 1h bot's
+(MT5_BOTS=1h, touch3_15m.py, the user's ask), beside the strategy that trades on its own
+(strong_zone_1m.py, through place). A trade's target is place's ratio, whatever its plan's
+target says: 1:2 (REWARD_RISK, the user's ask, 4/11/26) unless the strategy gives its own —
+the strong zones' 1:3.
 
 Safety, as in BOT MO:
   * MT5_MODE "off" (default) — nothing; "paper" — the order is only logged; "trade" —
     sent, and on a DEMO account only unless MT5_ALLOW_REAL;
   * the size from the risk: MT5_RISK_PERCENT of the balance lost at the stop;
   * one trade per pair — an alert on a pair already held is skipped;
+  * no trade against an open one (the user's ask, 4/11/26): long EURUSD is short USD, so
+    long USDCHF is skipped until it closes, whoever opened it;
   * a price already past the stop or the target — skipped."""
 import logging
 import math
@@ -31,6 +35,7 @@ except ImportError:  # not on Windows (Render), or not installed
 logger = logging.getLogger(__name__)
 
 MAGIC = 30311  # this app's orders, apart from BOT MO's (50505) and the ones by hand
+REWARD_RISK = 2  # a trade's target, in times its risk, unless its strategy gives another
 DEVIATION = 30  # points the price may move between the quote and the fill
 TICK_TRIES = 6  # half a second apart, for a symbol's first quote
 
@@ -60,6 +65,25 @@ def levels_ok(direction: str, bid: float, ask: float, stop: float, target: float
     if direction == "up":
         return stop < bid and ask < target
     return target < bid and ask < stop
+
+
+def legs(name: str, buy: bool) -> dict[str, int]:
+    """What a trade on this symbol is long (1) and short (-1) of: buying EURUSD is long EUR
+    and short USD, buying XAUUSD short USD too. Nothing for what isn't a pair (NAS100)."""
+    pair = name[:6].upper()
+    if len(pair) < 6 or not pair.isalpha():
+        return {}
+    return {pair[:3]: 1 if buy else -1, pair[3:]: -1 if buy else 1}
+
+
+def opposite_position(name: str, buy: bool, positions) -> Optional[object]:
+    """The first open position on the other side of a currency this trade would hold."""
+    mine = legs(name, buy)
+    for p in positions:
+        theirs = legs(p.symbol, p.type == mt5.POSITION_TYPE_BUY)
+        if any(theirs.get(currency) == -side for currency, side in mine.items()):
+            return p
+    return None
 
 
 def connect() -> bool:
@@ -137,7 +161,7 @@ def open_trade(bot: str, symbol: str, plan: TradePlan) -> Optional[int]:
         return None
 
 
-def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT INVEST") -> Optional[int]:
+def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT INVEST", reward_risk: float = REWARD_RISK) -> Optional[int]:
     """The trade as a market order on the broker's symbol name, under this magic number:
     its ticket (0 on paper), None when it wasn't opened. Connected, with lock held."""
     acc = mt5.account_info()
@@ -148,12 +172,17 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     if any(p.magic == magic for p in mt5.positions_get(symbol=name) or []):
         logger.info("MT5: %s already held — not traded again", name)
         return None
+    opposite = opposite_position(name, plan.direction == "up", mt5.positions_get() or [])
+    if opposite is not None:
+        logger.info("MT5: %s %s is against the open %s #%s — skipped", plan.direction, name, opposite.symbol, opposite.ticket)
+        return None
     info, tick = mt5.symbol_info(name), _tick(name)
     if info is None or tick is None:
         logger.warning("MT5: no price for %s: %s", name, mt5.last_error())
         return None
-    if not levels_ok(plan.direction, tick.bid, tick.ask, plan.stop, plan.target):
-        logger.info("MT5: %s at %s/%s, already past the stop %s or the target %s — skipped", name, tick.bid, tick.ask, plan.stop, plan.target)
+    target = target_at(plan.entry, plan.stop, reward_risk)
+    if not levels_ok(plan.direction, tick.bid, tick.ask, plan.stop, target):
+        logger.info("MT5: %s at %s/%s, already past the stop %s or the target %s — skipped", name, tick.bid, tick.ask, plan.stop, target)
         return None
     buy = plan.direction == "up"
     order_type = mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL
@@ -167,11 +196,10 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     if lots <= 0:
         logger.warning("MT5: %s even the smallest lot loses more than %.2f at the stop — skipped", name, risk)
         return None
-    # The target at the plan's ratio from the price it's opened at, not from the candle's
-    # close (plan.entry), a moment old: with a stop a few pips away, a pip either way made
-    # 1:2 into 1:3.4 (the user's EURUSD, 3/11/26).
-    ratio = abs(plan.target - plan.entry) / abs(plan.entry - plan.stop)
-    sl, tp = round(plan.stop, info.digits), round(target_at(price, plan.stop, ratio), info.digits)
+    # The target from the price it's opened at, not from the candle's close (plan.entry), a
+    # moment old: with a stop a few pips away, a pip either way made 1:2 into 1:3.4 (the
+    # user's EURUSD, 3/11/26).
+    sl, tp = round(plan.stop, info.digits), round(target_at(price, plan.stop, reward_risk), info.digits)
     side = "BUY" if buy else "SELL"
     if settings.mt5_mode != "trade":
         logger.info("MT5 PAPER: would %s %s %.2f lots @%s sl=%s tp=%s", side, name, lots, price, sl, tp)
@@ -185,7 +213,7 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
         logger.warning("MT5: %s %s refused: %s", side, name, (getattr(res, "retcode", None), getattr(res, "comment", "")) if res else mt5.last_error())
         return None
     logger.info("MT5: %s %s %.2f lots @%s sl=%s tp=%s — ticket %s", side, name, lots, res.price, sl, tp, res.order)
-    fill_tp = round(target_at(res.price, plan.stop, ratio), info.digits) if res.price else tp
+    fill_tp = round(target_at(res.price, plan.stop, reward_risk), info.digits) if res.price else tp
     if fill_tp != tp:  # filled off the quote: the target from the fill
         moved = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "symbol": name, "position": res.order, "sl": sl, "tp": fill_tp})
         ok = moved is not None and moved.retcode == mt5.TRADE_RETCODE_DONE

@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/api/my-trades", "destination": "/my-trades.json" }]
+}

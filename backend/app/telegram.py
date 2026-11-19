@@ -8,12 +8,15 @@ import html
 import json
 import logging
 import ssl
+import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Sequence
 from urllib.parse import quote, urlencode
 
 import requests
 import truststore
+import yfinance as yf
 from requests.adapters import HTTPAdapter
 
 from .config import settings
@@ -23,6 +26,18 @@ logger = logging.getLogger(__name__)
 API_BASE = "https://api.telegram.org"
 TIMEOUT_SECONDS = 15
 UPLOAD_TIMEOUT_SECONDS = 60
+
+# Yahoo's exchange codes → TradingView's: Nasdaq's three tiers, the NYSE, NYSE American
+# and Arca (TradingView lists both as AMEX), OTC.
+TRADINGVIEW_EXCHANGES = {
+    "NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NYQ": "NYSE", "ASE": "AMEX", "PCX": "AMEX",
+    "PNK": "OTC", "OQB": "OTC", "OQX": "OTC",
+}
+FOREX_EXCHANGE = "OANDA"
+# Each stock's TradingView exchange, once Yahoo told it: {"AAPL": "NASDAQ"}.
+EXCHANGE_CACHE = Path(__file__).resolve().parent.parent / "tradingview_exchanges.json"
+_exchanges: Optional[dict] = None
+_exchanges_lock = threading.Lock()
 
 
 class _SystemTrustAdapter(HTTPAdapter):
@@ -113,9 +128,49 @@ def bot_chat(bot: str) -> tuple[Optional[str], str]:
     return token, getattr(settings, f"telegram_{bot}_chat_id") or settings.telegram_chat_id
 
 
-def tradingview_url(symbol: str) -> str:
-    # Yahoo writes a forex pair as "GBPCHF=X"; TradingView knows it as plain "GBPCHF".
-    return f"https://www.tradingview.com/chart/?symbol={quote(symbol.removesuffix('=X'))}"
+def _yahoo_exchange(symbol: str) -> Optional[str]:
+    """Yahoo's exchange code for a stock ("NMS"), or None if Yahoo has none or can't be reached."""
+    for _ in range(2):  # Yahoo drops a call now and then
+        try:
+            quotes = yf.Search(symbol, max_results=5, news_count=0).quotes
+        except Exception:
+            continue
+        return next((q.get("exchange") for q in quotes if q.get("symbol") == symbol), None)
+    logger.warning("No exchange for %s: Yahoo's search failed", symbol)
+    return None
+
+
+def tradingview_exchange(symbol: str, lookup: bool = True) -> Optional[str]:
+    """TradingView's exchange for a stock ("NASDAQ"), from EXCHANGE_CACHE, else (when
+    lookup) from Yahoo, kept there. None when not known."""
+    global _exchanges
+    with _exchanges_lock:
+        if _exchanges is None:
+            try:
+                _exchanges = json.loads(EXCHANGE_CACHE.read_text())
+            except (OSError, ValueError):
+                _exchanges = {}
+        if symbol in _exchanges or not lookup:
+            return _exchanges.get(symbol)
+    exchange = TRADINGVIEW_EXCHANGES.get(_yahoo_exchange(symbol))
+    if exchange:
+        with _exchanges_lock:
+            _exchanges[symbol] = exchange
+            EXCHANGE_CACHE.write_text(json.dumps(_exchanges, indent=0, sort_keys=True))
+    return exchange
+
+
+def tradingview_url(symbol: str, lookup: bool = True) -> str:
+    """TradingView's chart of a Yahoo symbol, the exchange in front ("NASDAQ:AAPL"): with a
+    bare "AAPL" TradingView's phone app keeps its last chart open (the user found, 11/11/26).
+    lookup=False takes a stock's exchange from EXCHANGE_CACHE only, for a list of many."""
+    if symbol.endswith("=X"):  # Yahoo's "GBPCHF=X"
+        symbol = f"{FOREX_EXCHANGE}:{symbol.removesuffix('=X')}"
+    elif symbol.endswith(".TA"):
+        symbol = f"TASE:{symbol.removesuffix('.TA')}"
+    elif exchange := tradingview_exchange(symbol, lookup):
+        symbol = f"{exchange}:{symbol.replace('-', '.')}"  # Yahoo's "BRK-B" is NYSE's "BRK.B"
+    return f"https://www.tradingview.com/chart/?symbol={quote(symbol)}"
 
 
 def price(value: float) -> str:

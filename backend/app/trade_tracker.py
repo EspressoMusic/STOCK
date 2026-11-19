@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 from sqlalchemy.orm import Session
 
-from . import alert_chart, mt5_trader, signal_log, telegram
+from . import alert_chart, mt5_trader, push, signal_log, telegram
 from .candles import Candle, _to_candles, get_candles
 from .db import SessionLocal
 from .models import TrackedTrade
@@ -52,7 +52,8 @@ def send_alert(
     """An alert from the bot named (telegram.bot_chat): its chart picture with the text as
     the caption, or the text alone when there's no picture. With a plan, its trade is
     watched from now on — and opened on MetaTrader 5 (mt5_trader.py), for the bots set
-    there. Whether it went out."""
+    there. It also goes to the phones with the app's notifications on (push.py). Whether it
+    went out."""
     token, chat = telegram.bot_chat(bot)
     if png is None:
         message_id = telegram.post_message(text, chat_id=chat, bot_token=token)
@@ -61,6 +62,7 @@ def send_alert(
     if message_id is None:
         return False
     signal_log.record(key, symbol, name, text, png)
+    push.send_alert(text, key)
     if plan is not None:
         track(key, symbol, name, bot, chat, message_id, plan)
         mt5_trader.open_trade(bot, symbol, plan)

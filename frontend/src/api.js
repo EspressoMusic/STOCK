@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+// Over https (the phone, through Tailscale) a local http backend is on the same address:
+// Vite passes /api on to it (vite.config.js), as the page can't call http from https.
+const ENV_API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const API_BASE = window.location.protocol === "https:" && ENV_API_BASE.startsWith("http:") ? "" : ENV_API_BASE;
 
 async function request(path, options) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -145,6 +148,46 @@ export function getSignals(kind) {
 
 export function signalPictureUrl(id) {
   return `${API_BASE}/api/signals/${id}/picture`;
+}
+
+// Each model's pick of asset, timeframe and strategy with its months (backend model_challenge.py).
+export function getModelChallenge() {
+  return request("/api/model-challenge");
+}
+
+// Notifications on the phone from the app (backend push.py).
+export function getPushKey() {
+  return request("/api/push/key");
+}
+
+export function subscribePush(subscription) {
+  return request("/api/push/subscribe", { method: "POST", body: JSON.stringify(subscription) });
+}
+
+export function unsubscribePush(subscription) {
+  return request("/api/push/unsubscribe", { method: "POST", body: JSON.stringify(subscription) });
+}
+
+export function testPush() {
+  return request("/api/push/test", { method: "POST" });
+}
+
+// The user's own trades with their zones (backend my_trades.py), newest first.
+export function getMyTrades() {
+  return request("/api/my-trades");
+}
+
+// The chart panel's price alerts (backend price_alerts.py): the ones still waiting.
+export function getPriceAlerts() {
+  return request("/api/price-alerts");
+}
+
+export function createPriceAlert(symbol, price) {
+  return request("/api/price-alerts", { method: "POST", body: JSON.stringify({ symbol, price }) });
+}
+
+export function deletePriceAlert(id) {
+  return request(`/api/price-alerts/${id}`, { method: "DELETE" });
 }
 
 // Zone trainer charts (trainer.html). Marks (see lib/zoneTraining.js) and candles are

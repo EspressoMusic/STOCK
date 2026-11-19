@@ -54,7 +54,6 @@ from .zones import Zone
 logger = logging.getLogger(__name__)
 
 BOT = "1h"  # telegram.bot_chat — the bot that was "פורקס המשך"
-TAG = "מסחר יומי"
 NY = ZoneInfo("America/New_York")
 BAR_SECONDS = 900
 HOUR = 3600
@@ -86,9 +85,7 @@ MAX_PER_RUN = 15
 SEND_INTERVAL_SECONDS = 1.1
 DAILY_BARS_SHOWN = 60
 H4_BARS_SHOWN = 60
-M15_BARS_SHOWN = 60
-PICTURE_SIZE = (21, 7)  # three charts in a row
-M15_TIME_LABELS = 6  # its labels are long: more would run together at this width
+PICTURE_SIZE = (16, 6)  # two charts in a row: the 15m left out (the user's ask, 11/11/26)
 
 
 @dataclass
@@ -374,49 +371,30 @@ def history_signals(symbol: str, daily: Sequence[Candle], h1_df: pd.DataFrame, m
 
 
 def format_message(s: Signal, example: bool = False) -> str:
-    """The stock, then every reason it was taken — so the user can check each one."""
-    long = s.direction == "up"
-    tag = f"{TAG} · 💪 חזק" if s.strong else TAG
-    lines = [telegram.alert_caption(s.symbol, None, long, tag)]
+    """Only the stock, long or short and its TradingView link (the user's ask, 11/11/26, in
+    place of every reason it was taken) — and an example's time."""
+    text = telegram.alert_caption(s.symbol, None, s.direction == "up")
     if example:
         when = datetime.fromtimestamp(s.time + BAR_SECONDS, ZoneInfo(settings.alert_timezone))
-        lines.append(f"🕘 דוגמה מההיסטוריה · {when:%d/%m %H:%M}")
-    setup = s.setup
-    rejected = datetime.fromtimestamp(setup.daily[setup.touches[-1]].time + 43200, timezone.utc)
-    side = "מעל " if long else "מתחת ל-"
-    lines += [
-        f"📅 יומי: אזור {telegram.price(round(setup.zone.bottom, 2))}-{telegram.price(round(setup.zone.top, 2))}, "
-        f"{len(setup.touches)} נגיעות, נדחה ב-{rejected:%d/%m}",
-        f"🕓 4h: נר אחרון {'ירוק' if long else 'אדום'}",
-        f"📈 1h ו-15m: {side}EMA 50",
-    ]
-    if s.strong:
-        lines.append(f"💪 15m: {len(s.wicks)} דחיות בפתיל על ה-EMA 50")
-    return "\n".join(lines)
+        text += f"\n🕘 דוגמה מההיסטוריה · {when:%d/%m %H:%M}"
+    return text
 
 
 def picture(s: Signal) -> bytes:
-    """Top down, left to right: the daily zone with its touches, the 4h with the closed
-    candle the rule read, the 15m with its EMA and its wicks, each numbered at its tip."""
+    """The daily zone framed on its touches beside the 4h up to the closed candle the rule
+    read — in the user's style since 11/11/26 (alert_chart.STYLE, with the EMA 50 on both)."""
     setup = s.setup
-    tip = "high" if s.direction == "down" else "low"
     touches = [_iso(setup.daily[k].time) for k in setup.touches]
+    style = dict(alert_chart.STYLE, direction=s.direction)
     return alert_chart.render_side_by_side(
         ((setup.daily, f"{s.symbol} · 1D", setup.zone.bottom, setup.zone.top, touches[0]), dict(
-            direction=s.direction, breakout=touches[-1], touches=touches[:-1], time_format="%d/%m",
-            zone_colors=alert_chart.GOLD, min_bars=DAILY_BARS_SHOWN,
+            style, breakout=touches[-1], touches=touches[:-1], time_format="%d/%m", min_bars=DAILY_BARS_SHOWN,
         )),
         ((s.h4, f"{s.symbol} · 4h", None, None, None), dict(
-            direction=s.direction, breakout=_iso(s.h4[-1].time), time_format="%d/%m", after=s.h4_after,
+            style, breakout=_iso(s.h4[-1].time), time_format="%d/%m", after=s.h4_after,
             min_bars=H4_BARS_SHOWN,
         )),
-        ((s.m15, f"{s.symbol} · 15m", None, None, None), dict(
-            direction=s.direction, breakout=_iso(s.time),
-            numbers=[(_iso(s.m15[k].time), getattr(s.m15[k], tip)) for k in s.wicks],
-            line=s.ema, legend=(("EMA 50", alert_chart.LINE),), after=s.after, min_bars=M15_BARS_SHOWN,
-            time_labels=M15_TIME_LABELS,
-        )),
-        size=PICTURE_SIZE,
+        size=PICTURE_SIZE, divider=True, frame=True,
     )
 
 

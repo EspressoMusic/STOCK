@@ -136,7 +136,7 @@ def test_the_weeks_split_after_the_last_of_the_signals_month():
 
 def panels(monkeypatch) -> list:
     drawn = []
-    monkeypatch.setattr(alert_chart, "_png", lambda charts, size, divider=False, widths=None: drawn.extend(charts) or b"\x89PNG")
+    monkeypatch.setattr(alert_chart, "_png", lambda charts, size, divider=False, widths=None, frame=False: drawn.extend(charts) or b"\x89PNG")
     return drawn
 
 

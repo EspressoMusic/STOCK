@@ -6,7 +6,8 @@ package (Windows only) talks to it. Every alert of a bot in MT5_BOTS on a forex 
 goes out with its trade (trade_tracker.send_alert) is a market order there, at the alert's
 stop — the broker closes it, nothing more to watch. Since 4/11/26 that's the 1h bot's
 (MT5_BOTS=1h, touch3_15m.py, the user's ask), beside the strategy that trades on its own
-(strong_zone_1m.py, through place). A trade's target is place's ratio, whatever its plan's
+(strong_zone_1m.py, through place; since 11/11/26 range_grid.py's grid, through
+market_order). A trade's target is place's ratio, whatever its plan's
 target says: 1:2 (REWARD_RISK, the user's ask, 4/11/26) unless the strategy gives its own —
 the strong zones' 1:3.
 
@@ -124,7 +125,7 @@ def broker_symbol(symbol: str) -> Optional[str]:
     return _symbols[symbol]
 
 
-def _tick(name: str):
+def quote(name: str):
     """The symbol's quote — a symbol just added to Market Watch has none for a moment."""
     for _ in range(TICK_TRIES):
         tick = mt5.symbol_info_tick(name)
@@ -165,8 +166,7 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     """The trade as a market order on the broker's symbol name, under this magic number:
     its ticket (0 on paper), None when it wasn't opened. Connected, with lock held."""
     acc = mt5.account_info()
-    if settings.mt5_mode == "trade" and acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO and not settings.mt5_allow_real:
-        logger.warning("MT5: #%s is a REAL account — not traded (MT5_ALLOW_REAL=true allows it)", acc.login)
+    if real_blocked(acc):
         return None
     mt5.symbol_select(name, True)
     if any(p.magic == magic for p in mt5.positions_get(symbol=name) or []):
@@ -176,7 +176,7 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     if opposite is not None:
         logger.info("MT5: %s %s is against the open %s #%s — skipped", plan.direction, name, opposite.symbol, opposite.ticket)
         return None
-    info, tick = mt5.symbol_info(name), _tick(name)
+    info, tick = mt5.symbol_info(name), quote(name)
     if info is None or tick is None:
         logger.warning("MT5: no price for %s: %s", name, mt5.last_error())
         return None
@@ -200,25 +200,42 @@ def place(name: str, plan: TradePlan, magic: int = MAGIC, comment: str = "BOT IN
     # moment old: with a stop a few pips away, a pip either way made 1:2 into 1:3.4 (the
     # user's EURUSD, 3/11/26).
     sl, tp = round(plan.stop, info.digits), round(target_at(price, plan.stop, reward_risk), info.digits)
-    side = "BUY" if buy else "SELL"
     if settings.mt5_mode != "trade":
-        logger.info("MT5 PAPER: would %s %s %.2f lots @%s sl=%s tp=%s", side, name, lots, price, sl, tp)
+        logger.info("MT5 PAPER: would %s %s %.2f lots @%s sl=%s tp=%s", "BUY" if buy else "SELL", name, lots, price, sl, tp)
         return 0
-    res = mt5.order_send({
-        "action": mt5.TRADE_ACTION_DEAL, "symbol": name, "volume": lots, "type": order_type, "price": price,
-        "sl": sl, "tp": tp, "deviation": DEVIATION, "magic": magic, "comment": comment[:31],
-        "type_time": mt5.ORDER_TIME_GTC, "type_filling": _filling(info),
-    })
-    if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.warning("MT5: %s %s refused: %s", side, name, (getattr(res, "retcode", None), getattr(res, "comment", "")) if res else mt5.last_error())
+    res = market_order(name, info, buy, price, lots, sl, tp, magic, comment)
+    if res is None:
         return None
-    logger.info("MT5: %s %s %.2f lots @%s sl=%s tp=%s — ticket %s", side, name, lots, res.price, sl, tp, res.order)
     fill_tp = round(target_at(res.price, plan.stop, reward_risk), info.digits) if res.price else tp
     if fill_tp != tp:  # filled off the quote: the target from the fill
         moved = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "symbol": name, "position": res.order, "sl": sl, "tp": fill_tp})
         ok = moved is not None and moved.retcode == mt5.TRADE_RETCODE_DONE
         logger.info("MT5: %s #%s target to %s from the fill -> %s", name, res.order, fill_tp, "done" if ok else getattr(moved, "comment", mt5.last_error()))
     return res.order
+
+
+def real_blocked(acc) -> bool:
+    """A REAL account while trading — not traded unless MT5_ALLOW_REAL."""
+    if settings.mt5_mode == "trade" and acc.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO and not settings.mt5_allow_real:
+        logger.warning("MT5: #%s is a REAL account — not traded (MT5_ALLOW_REAL=true allows it)", acc.login)
+        return True
+    return False
+
+
+def market_order(name: str, info, buy: bool, price: float, lots: float, sl: float, tp: float, magic: int, comment: str):
+    """The order at the market with its stop and target: the broker's answer when filled,
+    None when refused (MT5's "Algo Trading" button off, too). Connected, with lock held."""
+    side = "BUY" if buy else "SELL"
+    res = mt5.order_send({
+        "action": mt5.TRADE_ACTION_DEAL, "symbol": name, "volume": lots, "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
+        "price": price, "sl": sl, "tp": tp, "deviation": DEVIATION, "magic": magic, "comment": comment[:31],
+        "type_time": mt5.ORDER_TIME_GTC, "type_filling": _filling(info),
+    })
+    if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+        logger.warning("MT5: %s %s refused: %s", side, name, (getattr(res, "retcode", None), getattr(res, "comment", "")) if res else mt5.last_error())
+        return None
+    logger.info("MT5: %s %s %.2f lots @%s sl=%s tp=%s — ticket %s", side, name, lots, res.price, sl, tp, res.order)
+    return res
 
 
 def target_at(price: float, stop: float, ratio: float) -> float:

@@ -7,16 +7,25 @@ together in time (the user's ask after the first examples: ~2 years back was too
 A touch is a week whose low (high) is under (over) the one on each side. Price comes back
 to it, and a week closes the trade's way past the body of the opposite candle before it
 (trade_plan.zone_entry: from above it's support, a long; from below, resistance, a
-short), with the Stochastic RSI (14, 14, 3) %K on that candle under 20 for a long, over
-80 for a short — the same rule as SHILO and the Nasdaq bot's model 2. A signal only, since
+short). Until 11/11/26 the Stochastic RSI (14, 14, 3) %K on that candle had to be under 20
+for a long, over 80 for a short; the user dropped every rule on the RSI (monthly_zone.py,
+off, keeps it). A signal only, since
 the user turned it back on in place of the monthly 50 EMA (8/11/26): no entry, stop or target
 drawn, no trade watched (the bots' rule since 4/11/26). The 1:3 trade (in on the close, the
 stop behind the zone and the visit's wicks) only drops shorts with a target under 0.
 
+Since 15/11/26 (the user's ask; option 2 = both zones, over the monthly one alone) the weekly
+zone must also sit in a strong monthly one — a price the closed months of the last five
+years turned at MIN_TOUCHES times, or a single monthly turn price moved away from strongly
+and has now come back to — and at the entry week's close the 4h price must be within a
+typical 4h candle of its EMA 50. The same day: the entry week must close still near the zone
+(MAX_AWAY), not after price already ran from it (the user's NXPI picture). The picture is the
+weeks beside the days, ending at the entry week — an example's too.
+
 The user's LLY: the zone at ~1,100-1,150 touched on 22/6, 13/7 and 3/8/26, the week of
 14/9/26 closed green over the red body before it with %K at 6.5 — a long at ~1,153.
-On ~3.4 years of 100 big names: ~3 signals a week, longs +0.13R a trade at 1:3, shorts
--0.33R (zones from 3 years back: +0.38R and -0.41R) — the user kept both.
+On ~3.4 years of 100 big names, with the RSI rule: ~3 signals a week, longs +0.13R a trade
+at 1:3, shorts -0.33R (zones from 3 years back: +0.38R and -0.41R) — the user kept both.
 
 Checked once a week on Sunday evening in Israel, before the week's trading opens
 (scheduler.py), on ~4,500 US stocks (Nasdaq, the NYSE and NYSE American) and ~500 Tel Aviv
@@ -39,19 +48,18 @@ from sqlalchemy.orm import Session
 from yfinance import EquityQuery
 
 from . import alert_chart, telegram, trade_tracker
-from .candles import Candle, _to_candles
+from .candles import Candle, _to_candles, get_4h_dataframe
 from .config import settings
 from .misc_strategies import LARGE_CAPS
 from .scanner import NASDAQ_EXCHANGES, _fetch_all_quotes
 from .technical_scan import _get_stock_universe, _round_sig, _stoch_rsi, _stock_fetch_limiter
 from .trade_plan import TradePlan, zone_entry, zone_plan
 from .zone_touch_scan import send_new
-from .zones import RETEST_REACH, detect_zones
+from .zones import RETEST_REACH, _find_pivots, detect_zones, typical_candle
 
 logger = logging.getLogger(__name__)
 
 BOT = "stocks"
-TAG = "שבועי"
 NY = ZoneInfo("America/New_York")
 WEEK = 7 * 86400
 HISTORY_PERIOD = "5y"
@@ -60,6 +68,7 @@ WINDOW_BARS = 26
 MIN_TOUCHES = 3
 PIVOT_BARS = 1
 REACH = RETEST_REACH
+MAX_AWAY = 0.5  # the most typical weeks the entry week may close past the zone's edge
 STOCH_OVERSOLD = 20.0
 STOCH_OVERBOUGHT = 80.0
 # The stocks: every US one trading 100K shares a day (LLY is on the NYSE), and Tel Aviv's.
@@ -71,11 +80,30 @@ MAX_ALERTS = 60
 PICTURE_BARS = 60
 AFTER_BARS = 40  # an example's weeks shown after its entry
 # The picture, near today (the user's ask, 8/11/26): the zone's half year of weeks and about
-# three months of days, and an example's weeks and days after its entry.
+# three months of days (months in their place 11-15/11/26), with enough days before them for
+# the EMA 50 to settle. None of an example's weeks and days after its entry: the user reads
+# the picture's right edge as the alert's moment (15/11/26).
 WEEK_BARS = 34
+AFTER_WEEKS = 0
+WEEKS_SIZE = (10, 5.6)  # the picture of the weeks alone
+MONTHS_PERIOD = "10y"
 DAY_BARS = 65
-AFTER_WEEKS = 8
-AFTER_DAYS = 15
+AFTER_DAYS = 0
+DAYS_PERIOD = "3y"
+# The monthly zone the weekly one must sit in: from the closed months of the last five years,
+# 3+ touches, or one turn beating MONTH_PIVOT_BARS months on each side that price moved
+# STRONG_MOVE typical months away from within MOVE_MONTHS — its zone ± MONTH_REACH of one.
+MONTH_WINDOW = 60
+MONTH_PIVOT_BARS = 2
+STRONG_MOVE = 2.0
+MOVE_MONTHS = 6
+MONTH_REACH = 0.25
+# The 4h at the entry week's close: within H4_NEAR typical 4h candles of its EMA 50 (Yahoo
+# keeps two years of the 1h they're built from).
+H4_EMA = 50
+H4_SETTLE = 150
+H4_NEAR = 1.0
+H4_PERIOD = "2y"
 
 
 @dataclass
@@ -92,6 +120,7 @@ class Signal:
     k: list[float] = field(default_factory=list, repr=False)
     d: list[float] = field(default_factory=list, repr=False)
     after: list[Candle] = field(default_factory=list, repr=False)  # an example's: the weeks after it
+    month_zone: Optional[tuple[float, float]] = None  # the monthly (bottom, top) it sits in
 
     @property
     def time(self) -> int:
@@ -109,9 +138,11 @@ def _iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
-def signal_at(candles: Sequence[Candle], k: Sequence[float], i: int) -> Optional[tuple]:
-    """(direction, zone, the visit's first candle, trade) when week i is the entry — seeing
-    only the weeks up to it."""
+def signal_at(candles: Sequence[Candle], i: int, k: Optional[Sequence[float]] = None) -> Optional[tuple]:
+    """(direction, zone, the visit's first candle, trade) when candle i is the entry — seeing
+    only the candles up to it. With k, the Stochastic RSI's %K, a long also needs it under
+    STOCH_OVERSOLD and a short over STOCH_OVERBOUGHT: monthly_zone.py's rule, not the weekly
+    zone's since 11/11/26."""
     lo = max(0, i + 1 - WINDOW_BARS)
     window = candles[lo : i + 1]
     for zone in detect_zones(window, min_touches=MIN_TOUCHES, pivot_bars=PIVOT_BARS):
@@ -121,7 +152,7 @@ def signal_at(candles: Sequence[Candle], k: Sequence[float], i: int) -> Optional
     else:
         return None
     direction, a = found
-    if not (k[i] < STOCH_OVERSOLD if direction == "up" else k[i] > STOCH_OVERBOUGHT):
+    if k is not None and not (k[i] < STOCH_OVERSOLD if direction == "up" else k[i] > STOCH_OVERBOUGHT):
         return None
     trade = zone_plan(window, a, direction, zone.bottom, zone.top, zone.unit)
     if trade is None or trade.target <= 0:  # a short's 1:3 on a cheap stock can go under 0
@@ -130,29 +161,77 @@ def signal_at(candles: Sequence[Candle], k: Sequence[float], i: int) -> Optional
     return direction, zone, lo + a, trade
 
 
-def _signal(symbol: str, name: Optional[str], candles: Sequence[Candle], k, d, i: int) -> Optional[Signal]:
-    got = signal_at(candles, k, i)
+def _signal(symbol: str, name: Optional[str], candles: Sequence[Candle], i: int) -> Optional[Signal]:
+    got = signal_at(candles, i)
     if got is None:
         return None
     direction, zone, a, trade = got
+    close = candles[i].close
+    if (close - zone.top if direction == "up" else zone.bottom - close) > MAX_AWAY * zone.unit:
+        return None
     marks = sorted({*zone.touch_idx, *([a] if a < i else [])})
     return Signal(
         symbol, name, direction, i, _round_sig(zone.bottom), _round_sig(zone.top),
-        [_iso(candles[t].time) for t in marks], trade, list(candles[: i + 1]), list(k[: i + 1]), list(d[: i + 1]),
+        [_iso(candles[t].time) for t in marks], trade, list(candles[: i + 1]),
     )
 
 
 def stoch(candles: Sequence[Candle]) -> tuple[list[float], list[float]]:
+    """The Stochastic RSI's (%K, %D), for monthly_zone.py."""
     k, d = _stoch_rsi(pd.Series([c.close for c in candles]))
     return k.tolist(), d.tolist()
 
 
-def find_signals(symbol: str, name: Optional[str], candles: Sequence[Candle]) -> list[Signal]:
-    """Every signal on these weeks, oldest first."""
-    k, d = stoch(candles)
+def monthly_zone(months: Sequence[Candle], bottom: float, top: float) -> Optional[tuple[float, float]]:
+    """The strong monthly zone (bottom, top) the weekly zone from bottom to top sits in,
+    seeing only these closed months: a price turned at MIN_TOUCHES times, else a single turn
+    price moved STRONG_MOVE typical months away from — down from a high, up from a low."""
+    window = months[-MONTH_WINDOW:]
+    for zone in detect_zones(window, min_touches=MIN_TOUCHES, pivot_bars=PIVOT_BARS):
+        if zone.bottom <= top and zone.top >= bottom:
+            return zone.bottom, zone.top
+    unit = typical_candle(window)
+    for j, price in _find_pivots(window, MONTH_PIVOT_BARS):
+        reach = MONTH_REACH * unit * price
+        if price - reach > top or price + reach < bottom:
+            continue
+        later = window[j + 1 : j + 1 + MOVE_MONTHS]
+        move = STRONG_MOVE * unit * price
+        if price == window[j].high and any(c.low <= price - move for c in later):
+            return price - reach, price + reach
+        if price == window[j].low and any(c.high >= price + move for c in later):
+            return price - reach, price + reach
+    return None
+
+
+def near_ema_4h(h4: Sequence[Candle]) -> bool:
+    """The last 4h candle closed within H4_NEAR typical 4h candles of its EMA 50."""
+    if len(h4) < H4_SETTLE:
+        return False
+    c = h4[-1]
+    ema = alert_chart.ema_of(h4, H4_EMA)[-1]
+    return abs(c.close - ema) <= H4_NEAR * typical_candle(h4[-H4_SETTLE:]) * c.close
+
+
+def confirmed(s: Signal, months: Sequence[Candle], h4: Sequence[Candle]) -> bool:
+    """The weekly signal also has its monthly zone, from the months before the entry week's,
+    and the 4h near its EMA 50 at the week's close; the zone is kept on it."""
+    entry = _month(s.time + 4 * 86400)
+    zone = monthly_zone([c for c in months if _month(c.time) < entry], s.zone_bottom, s.zone_top)
+    week = [c for c in h4 if c.time < s.time + WEEK]
+    if zone is None or not week or week[-1].time < s.time or not near_ema_4h(week):
+        return False
+    s.month_zone = zone
+    return True
+
+
+def find_signals(
+    symbol: str, name: Optional[str], candles: Sequence[Candle], months: Sequence[Candle], h4: Sequence[Candle]
+) -> list[Signal]:
+    """Every signal on these weeks with its monthly zone and 4h EMA, oldest first."""
     out = []
     for i in range(WINDOW_BARS // 2, len(candles)):
-        if s := _signal(symbol, name, candles, k, d, i):
+        if (s := _signal(symbol, name, candles, i)) and confirmed(s, months, h4):
             s.after = list(candles[i + 1 :])
             out.append(s)
     return out
@@ -180,15 +259,38 @@ def fetch(symbol: str, period: str = HISTORY_PERIOD) -> list[Candle]:
     return candles if candles and week_closed(candles[-1], time.time()) else candles[:-1]
 
 
-def fetch_days(symbol: str) -> list[Candle]:
-    """The symbol's last year of days, for the picture; none if Yahoo has none."""
+def fetch_months(symbol: str) -> list[Candle]:
+    """The symbol's months, the last one still trading; none if Yahoo has none."""
     _stock_fetch_limiter.wait()
     try:
-        df = yf.Ticker(symbol).history(interval="1d", period="1y")
+        df = yf.Ticker(symbol).history(interval="1mo", period=MONTHS_PERIOD)
+    except Exception:
+        logger.warning("Weekly zone: monthly history fetch failed for %s", symbol)
+        return []
+    return _to_candles(df.dropna()) if df is not None and not df.empty else []
+
+
+def fetch_days(symbol: str) -> list[Candle]:
+    """The symbol's days, for the picture; none if Yahoo has none."""
+    _stock_fetch_limiter.wait()
+    try:
+        df = yf.Ticker(symbol).history(interval="1d", period=DAYS_PERIOD)
     except Exception:
         logger.warning("Weekly zone: daily history fetch failed for %s", symbol)
         return []
     return _to_candles(df.dropna()) if df is not None and not df.empty else []
+
+
+def fetch_4h(symbol: str) -> list[Candle]:
+    """The symbol's 4h candles; none if Yahoo has none."""
+    _stock_fetch_limiter.wait()
+    df = get_4h_dataframe(symbol, period=H4_PERIOD)
+    return _to_candles(df) if df is not None else []
+
+
+def _month(t: int) -> str:
+    """A candle's month, read at midday: a stamp late the evening before stays in it."""
+    return f"{datetime.fromtimestamp(t + 43200, timezone.utc):%Y-%m}"
 
 
 def _evaluate(symbol: str, name: Optional[str]) -> Optional[Signal]:
@@ -196,8 +298,8 @@ def _evaluate(symbol: str, name: Optional[str]) -> Optional[Signal]:
     candles = fetch(symbol)
     if len(candles) < WINDOW_BARS // 2 or time.time() - candles[-1].time > 2 * WEEK:
         return None
-    k, d = stoch(candles)
-    return _signal(symbol, name, candles, k, d, len(candles) - 1)
+    s = _signal(symbol, name, candles, len(candles) - 1)
+    return s if s and confirmed(s, fetch_months(symbol), fetch_4h(symbol)) else None
 
 
 def _tase_universe() -> list[tuple[str, Optional[str]]]:
@@ -232,39 +334,39 @@ def scan() -> list[Signal]:
 
 
 def format_message(s: Signal, example: bool = False) -> str:
-    text = telegram.alert_caption(s.symbol, None, s.direction == "up", TAG)
+    text = telegram.alert_caption(s.symbol, None, s.direction == "up")  # no tag (the user's ask, 11/11/26)
     if example:
         text += f"\n🕘 דוגמה מההיסטוריה · השבוע של {datetime.fromtimestamp(s.time, NY):%d/%m/%y}"
     return text
 
 
 def picture(s: Signal) -> bytes:
-    """The weeks beside the days (the user's ask, 8/11/26), near today: on the weeks the zone
-    and its touches, the entry week's arrow and the Stochastic RSI under them — as on the
-    user's picture, without its trade; on the days the zone, the entry week's days framed and
-    the arrow on its last. The weeks alone if the days can't be had."""
+    """The weeks beside the days (the user's ask, 15/11/26, in place of the months), near
+    today, in the user's style (alert_chart.STYLE: framed, no gaps, no marks for now): the
+    zone from its first touch on the weeks, across the days, up to the entry week and its
+    days — an example's after them. The weeks alone if the days can't be had."""
+    marks = dict(alert_chart.STYLE, direction=s.direction)
     weeks = (
         (s.candles, f"{s.symbol} · 1W", s.zone_bottom, s.zone_top, s.touch_times[0]),
         dict(
-            direction=s.direction, breakout=_iso(s.time), touches=s.touch_times, stoch=(s.k, s.d),
+            marks, breakout=_iso(s.time), touches=s.touch_times,
             time_format="%d/%m", min_bars=WEEK_BARS, max_bars=WEEK_BARS, after=s.after[:AFTER_WEEKS],
         ),
     )
-    end = s.time + WEEK
     days, later = [], []
     for c in fetch_days(s.symbol):
-        (days if c.time < end else later).append(c)
+        (days if c.time < s.time + WEEK else later).append(c)
     week_days = [c for c in days if c.time >= s.time]
     if not week_days:
-        return alert_chart.render(*weeks[0], **weeks[1])
+        return alert_chart.render_side_by_side(weeks, size=WEEKS_SIZE, frame=True)
     first, last = _iso(week_days[0].time), _iso(week_days[-1].time)
     return alert_chart.render_side_by_side(weeks, (
         (days, f"{s.symbol} · 1D", s.zone_bottom, s.zone_top, None),
         dict(
-            direction=s.direction, breakout=last, boxes=[(first, last)],
+            marks, breakout=last, boxes=[(first, last)],
             time_format="%d/%m", min_bars=DAY_BARS, max_bars=DAY_BARS, after=later[:AFTER_DAYS],
         ),
-    ), divider=True)
+    ), divider=True, frame=True)
 
 
 def send_alert(s: Signal, example: bool = False) -> bool:
@@ -285,7 +387,10 @@ def run_weekly_zone(db: Session) -> int:
 
 if __name__ == "__main__":
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    found = [s for symbol in LARGE_CAPS for s in find_signals(symbol, None, fetch(symbol))]
+    found = [
+        s for symbol in LARGE_CAPS
+        for s in find_signals(symbol, None, fetch(symbol), fetch_months(symbol), fetch_4h(symbol))
+    ]
     found.sort(key=lambda s: s.time)
     print(f"{len(found)} signals")
     for s in found[-count:]:

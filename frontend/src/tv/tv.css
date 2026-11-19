@@ -1,0 +1,563 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+/* The TradingView-style chart panel (tv.html). Its own styles only — it doesn't load the
+   app's index.css. Light is the user's own TradingView gray (TvApp's CHART_THEMES), dark is
+   TradingView's. */
+
+:root {
+  --tv-accent: #2962ff;
+  --tv-up: #089981;
+  --tv-down: #f23645;
+  --tv-bg: #787b86;
+  --tv-top-bg: #63666f;
+  --tv-border: #5f626c;
+  --tv-text: #16181e;
+  --tv-muted: #2f323b;
+  --tv-hover: #6b6e78;
+  --tv-row-active: rgba(41, 98, 255, 0.12);
+  --tv-shade: rgba(19, 23, 34, 0.4);
+  --tv-shadow: 0 2px 14px rgba(0, 0, 0, 0.15);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --tv-bg: #131722;
+  --tv-top-bg: #0c0f17;
+  --tv-border: #2a2e39;
+  --tv-text: #d1d4dc;
+  --tv-muted: #787b86;
+  --tv-hover: #2a2e39;
+  --tv-row-active: rgba(41, 98, 255, 0.22);
+  --tv-shade: rgba(0, 0, 0, 0.55);
+  --tv-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--tv-bg);
+  color: var(--tv-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Top toolbar and chart; the watchlist opens from the top bar. */
+.tv {
+  display: grid;
+  height: 100vh;
+  height: 100dvh; /* a phone's browser bars don't cover the time scale */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+
+.tv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tv-btn:hover,
+.tv-icon-btn:hover {
+  background: var(--tv-hover);
+}
+
+.tv-btn.active {
+  color: var(--tv-accent);
+}
+
+.tv-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+
+.tv-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--tv-border);
+}
+
+.tv-top {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--tv-top-bg);
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-symbol b {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.tv-interval {
+  padding: 0 7px;
+  font-weight: 700;
+}
+
+/* The Indicators button and its box */
+.tv-ind {
+  position: relative;
+}
+
+.tv-ind-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--tv-bg);
+  box-shadow: var(--tv-shadow);
+}
+
+.tv-ind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 4px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tv-ind-row:hover {
+  background: var(--tv-hover);
+}
+
+.tv-ind-row.on > svg {
+  color: var(--tv-accent);
+}
+
+.tv-ind-check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--tv-muted);
+  border-radius: 4px;
+}
+
+/* The candle thickness box: two sliders */
+.tv-candle-menu {
+  min-width: 250px;
+  padding: 8px 10px;
+}
+
+.tv-candle-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.tv-candle-row input {
+  width: 100%;
+  accent-color: var(--tv-accent);
+}
+
+.tv-candle-row b {
+  text-align: right;
+}
+
+.tv-candle-reset {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.tv-candle-reset:hover {
+  background: var(--tv-hover);
+}
+
+.tv-ind-row.on .tv-ind-check {
+  border-color: var(--tv-accent);
+  background: var(--tv-accent);
+  color: #fff;
+}
+
+.tv-chart-area {
+  grid-column: 1;
+  grid-row: 2;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tv-chart {
+  position: absolute;
+  inset: 0;
+}
+
+/* The right-click menu on the chart, where the mouse was */
+.tv-ctx-menu {
+  min-width: 0;
+}
+
+.tv-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tv-muted);
+  font-size: 15px;
+  pointer-events: none;
+}
+
+.tv-error {
+  color: var(--tv-down);
+}
+
+/* Watchlist box under its top bar button */
+.tv-watch {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: min(560px, calc(100vh - 60px));
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--tv-bg);
+  box-shadow: var(--tv-shadow);
+}
+
+.tv-watch-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 32px;
+  padding: 0 6px;
+}
+
+.tv-watch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 76px;
+  align-items: center;
+  padding: 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-watch-row span {
+  text-align: right;
+}
+
+.tv-watch-rows {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tv-watch-row {
+  position: relative;
+  height: 32px;
+  cursor: pointer;
+}
+
+.tv-watch-row:hover {
+  background: var(--tv-hover);
+}
+
+.tv-watch-row.active {
+  background: var(--tv-row-active);
+}
+
+.tv-watch-row b {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-watch-row .up {
+  color: var(--tv-up);
+}
+
+.tv-watch-row .down {
+  color: var(--tv-down);
+}
+
+.tv-watch-remove {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--tv-bg);
+  color: var(--tv-muted);
+}
+
+.tv-watch-row:hover .tv-watch-remove {
+  display: inline-flex;
+}
+
+.tv-watch-remove:hover {
+  color: var(--tv-text);
+}
+
+/* Signals box: the watchlist's box, a tab per strategy */
+.tv-sig-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 6px 6px;
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-sig-count {
+  color: var(--tv-muted);
+  font-size: 11px;
+}
+
+.tv-watch-row.tv-sig-row {
+  grid-template-columns: minmax(0, 1fr) 72px 112px;
+}
+
+/* My trades box: name, zone, when the zone began */
+.tv-watch.tv-trades {
+  width: 400px;
+}
+
+.tv-watch-row.tv-trade-row {
+  grid-template-columns: minmax(0, 1fr) 176px 104px;
+}
+
+/* Scanner box: the signals' box with a tab per scan and a Scan button */
+.tv-watch.tv-scan {
+  width: 360px;
+}
+
+.tv-sig-tabs.tv-scan-tabs {
+  flex-wrap: wrap;
+}
+
+.tv-scan-note {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--tv-muted);
+  font-size: 11px;
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-watch-row.tv-scan-row {
+  grid-template-columns: minmax(0, 1fr) 110px 84px;
+}
+
+.tv-alert-create:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Price alerts box: the symbol and a price to set one, then the alerts waiting */
+.tv-alert-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-alert-form b {
+  font-weight: 800;
+}
+
+.tv-alert-form input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--tv-border);
+  border-radius: 4px;
+  outline: 0;
+  background: none;
+  color: var(--tv-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-alert-form input:focus {
+  border-color: var(--tv-accent);
+}
+
+.tv-alert-create {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: var(--tv-accent);
+  color: #fff;
+}
+
+.tv-watch-row.tv-alert-row {
+  grid-template-columns: minmax(0, 1fr) 30px 110px;
+}
+
+/* Symbol search dialog */
+.tv-modal-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 10vh;
+  background: var(--tv-shade);
+}
+
+.tv-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 32px));
+  max-height: 70vh;
+  border-radius: 6px;
+  background: var(--tv-bg);
+  box-shadow: var(--tv-shadow);
+  overflow: hidden;
+}
+
+.tv-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 8px 20px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.tv-modal-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--tv-border);
+  border-bottom: 1px solid var(--tv-border);
+  color: var(--tv-muted);
+}
+
+.tv-modal-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--tv-text);
+  font: inherit;
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+.tv-modal-input input::placeholder {
+  text-transform: none;
+  color: var(--tv-muted);
+}
+
+.tv-modal-results {
+  overflow-y: auto;
+  min-height: 60px;
+}
+
+.tv-result {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  padding: 0 20px;
+  text-align: left;
+}
+
+.tv-result.active {
+  background: var(--tv-hover);
+}
+
+.tv-result-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-result-meta {
+  color: var(--tv-muted);
+  font-size: 12px;
+}
+
+.tv-modal-empty {
+  margin: 0;
+  padding: 18px 20px;
+  color: var(--tv-muted);
+}
+
+/* On a phone (the live site, 19/11/26) the top bar wraps onto a second row and every box
+   opens across the screen under it. Last in the file, so it wins over the boxes' own widths. */
+@media (max-width: 700px) {
+  .tv {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .tv-top {
+    flex-wrap: wrap;
+    padding: 2px 4px;
+  }
+
+  .tv-watch,
+  .tv-ind-menu {
+    position: fixed;
+    top: 76px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 90px);
+  }
+
+  .tv-watch.tv-trades,
+  .tv-watch.tv-scan {
+    width: auto;
+  }
+}

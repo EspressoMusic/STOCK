@@ -37,7 +37,9 @@ class ThickCandlestickRenderer {
     // Cap the border relative to the body width so it never swallows the fill color entirely
     // on a tight zoom (e.g. a default view of ~40 narrow bars on a phone-width chart).
     const borderWidthBitmap = Math.max(1, Math.min(Math.round(options.borderWidth * hRatio), Math.floor(bodyWidthBitmap * 0.35)));
-    const wickWidthBitmap = Math.max(1, Math.round(options.wickWidth * hRatio));
+    // The wick shrinks with the body too, so a zoomed-out chart gets hairline wicks instead of
+    // thick black bars wider than the candles themselves.
+    const wickWidthBitmap = Math.max(1, Math.min(Math.round(options.wickWidth * hRatio), Math.floor(bodyWidthBitmap * 0.3)));
     // A candle whose open and close (nearly) match — common on symbols that move a cent at a
     // time — would be nothing but its border: a black dash that reads as a bar chart's tick.
     // It gets a body at least this tall, so the fill still shows between the borders.
@@ -60,7 +62,9 @@ class ThickCandlestickRenderer {
       const highYBitmap = highY * vRatio;
       const lowYBitmap = lowY * vRatio;
 
-      ctx.fillStyle = options.wickColor;
+      // An empty wick/border color follows the candle's up/down color.
+      const sideColor = isUp ? options.upColor : options.downColor;
+      ctx.fillStyle = options.wickColor || sideColor;
       const wickX = xBitmap - Math.floor(wickWidthBitmap / 2);
       ctx.fillRect(wickX, highYBitmap, wickWidthBitmap, Math.max(1, lowYBitmap - highYBitmap));
 
@@ -71,10 +75,10 @@ class ThickCandlestickRenderer {
 
       // A bar's own `bodyColor` overrides the up/down fill. (Not `color`: the library pulls
       // that out of custom-series data and falls back to the series' default color.)
-      ctx.fillStyle = bar.originalData.bodyColor ?? (isUp ? options.upColor : options.downColor);
+      ctx.fillStyle = bar.originalData.bodyColor ?? sideColor;
       ctx.fillRect(bodyX, top, bodyWidthBitmap, bodyHeight);
 
-      ctx.strokeStyle = options.borderColor;
+      ctx.strokeStyle = options.borderColor || sideColor;
       ctx.lineWidth = borderWidthBitmap;
       ctx.strokeRect(
         bodyX + borderWidthBitmap / 2,

@@ -258,13 +258,12 @@ def test_the_alert_is_three_charts_with_no_trade_drawn_or_watched(monkeypatch):
     monkeypatch.setattr(trade_tracker.mt5_trader, "open_trade", lambda *args: opened.append(args))
     s = setup()
     assert daily_zone_1h.send_alert(s)
-    assert [args[1] for args, _ in charts] == ["EUR/USD · 1d", "EUR/USD · 4h", "EUR/USD · 1h"]
+    assert [args[1] for args, _ in charts] == ["EUR/USD · 1d", "EUR/USD · 4h"]  # the two bigger timeframes
     assert all(kwargs.get("plan") is None for _, kwargs in charts)
-    # the daily zone's turns and the return circled; both breaks boxed, no arrow, no numbers
+    # the daily chart framed on the zone's turns and the return, in the user's style (marks not drawn)
     assert charts[0][1]["touches"] == [*s.turns, daily_zone_1h._iso(s.candles_1d[-1].time)]
-    assert charts[2][1]["boxes"] == [(s.broke, s.broke), (s.time, s.time)]
-    assert "breakout" not in charts[2][1] and "numbers" not in charts[2][1]
-    assert options == [dict(size=daily_zone_1h.PICTURE_SIZE, divider=True, widths=daily_zone_1h.WIDTHS)]
+    assert all(kwargs["plain"] and kwargs["gapless"] and kwargs["ema"] == 50 for _, kwargs in charts)
+    assert options == [dict(size=daily_zone_1h.PICTURE_SIZE, divider=True, frame=True)]
     assert tracked == [] and opened == []
 
 

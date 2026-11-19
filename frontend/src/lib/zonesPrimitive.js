@@ -110,7 +110,12 @@ export class ZonesPrimitive {
     texts: { breakout: "", retest: "", flash: "", erased: "" },
   };
 
-  constructor() {
+  // colors: { zoneFill, zoneLine } in place of the default blue zones; toLastCandle ends
+  // the zones at the last candle instead of the pane's right edge.
+  constructor(colors = {}, { toLastCandle = false } = {}) {
+    this._zoneFill = colors.zoneFill ?? COLORS.zoneFill;
+    this._zoneLine = colors.zoneLine ?? COLORS.zoneLine;
+    this._toLastCandle = toLastCandle;
     const renderer = { draw: (target) => target.useMediaCoordinateSpace((scope) => this._draw(scope)) };
     // The breakout / retest candle marks go above the candles, so their labels aren't
     // hidden behind neighbouring candles.
@@ -164,7 +169,8 @@ export class ZonesPrimitive {
   }
 
   _zoneRect(zone) {
-    return this._rect(zone.startIdx, null, zone.top, zone.bottom);
+    const end = this._toLastCandle ? Math.max(zone.startIdx, this._state.candles.length - 1) : null;
+    return this._rect(zone.startIdx, end, zone.top, zone.bottom);
   }
 
   _eventRect(ev) {
@@ -214,9 +220,9 @@ export class ZonesPrimitive {
       const r = this._zoneRect(zone);
       if (!r) continue;
       const verdict = verdicts[zone.id];
-      ctx.fillStyle = verdict === "wrong" ? COLORS.wrongFill : COLORS.zoneFill;
+      ctx.fillStyle = verdict === "wrong" ? COLORS.wrongFill : this._zoneFill;
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      const line = verdict === "ok" ? COLORS.okLine : verdict === "wrong" ? COLORS.wrongLine : COLORS.zoneLine;
+      const line = verdict === "ok" ? COLORS.okLine : verdict === "wrong" ? COLORS.wrongLine : this._zoneLine;
       ctx.strokeStyle = line;
       ctx.lineWidth = verdict === "ok" ? 2 : 1;
       ctx.setLineDash(verdict === "wrong" ? [4, 3] : []);

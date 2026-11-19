@@ -4,14 +4,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 
-from . import telegram
+from . import price_alerts, telegram
 from .config import settings
 from .daily_zone_1h import run_daily_zone_alerts
 from .db import SessionLocal
 from .mt5_closed import report_closed
 from .mt5_opened import report_opened
 from .pipeline import run_full_scan_cycle, run_broken_scan_cycle
-from .strong_zone_1m import run_strategy
+from .range_grid import run_strategy
 from .stock_day import run_stock_day
 from .weekly_zone import run_weekly_zone
 
@@ -72,6 +72,10 @@ def _mt5_strategy_job():
         db.close()
 
 
+def _price_alerts_job():
+    price_alerts.check()
+
+
 def start_scheduler():
     for label, time_str in (("morning", settings.scan_time_1), ("afternoon", settings.scan_time_2)):
         hour, minute = (int(x) for x in time_str.split(":"))
@@ -101,10 +105,11 @@ def start_scheduler():
     # penny_scan.run_penny_live), the monthly zone (monthly_zone.py), SHILO (shilo.py) and the
     # stocks' 4h types (tight_touch_scan.py).
 
-    # The strategy MetaTrader 5 trades on its own (strong_zone_1m.py, in place of
-    # ema_touch3_5m.py since 4/11/26, its code kept): 5 seconds after each 1m candle closes —
-    # its candles come from the terminal, with no delay. Then the trades that opened and
-    # closed go to the Nasdaq bot (mt5_opened.py, mt5_closed.py, the user's asks 3-4/11/26).
+    # The strategy MetaTrader 5 trades on its own (range_grid.py, the Nasdaq grid, in place of
+    # strong_zone_1m.py since 11/11/26 and ema_touch3_5m.py before it, their code kept): 5
+    # seconds after each 1m candle closes — its candles come from the terminal, with no delay.
+    # Then the trades that opened and closed go to the Nasdaq bot (mt5_opened.py,
+    # mt5_closed.py, the user's asks 3-4/11/26).
     if settings.mt5_mode != "off":
         scheduler.add_job(
             _mt5_strategy_job,
@@ -113,6 +118,16 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=60,
         )
+
+    # The chart panel's price alerts (price_alerts.py), to the phone: every minute.
+    scheduler.add_job(
+        _price_alerts_job,
+        trigger=CronTrigger(second=20, timezone="UTC"),
+        id="price_alerts",
+        replace_existing=True,
+        misfire_grace_time=60,
+        max_instances=1,
+    )
 
     if telegram.is_configured():
         # The forex bot, the main one (daily_zone_1h.py): daily zone, a 4h candle, then the break

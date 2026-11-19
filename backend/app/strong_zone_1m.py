@@ -1,4 +1,5 @@
-"""The strategy MetaTrader 5 trades on its own since 4/11/26 — the user's: strong zones on
+"""The strategy MetaTrader 5 traded on its own 4/11/26-11/11/26 (range_grid.py since, the
+user's call) — the user's: strong zones on
 EUR/USD, gold and the Nasdaq (MT5_STRATEGY_SYMBOLS), entered on 1-minute candles read from
 the terminal itself (mt5_trader.py):
 

@@ -457,6 +457,53 @@ class SignalOut(BaseModel):
     example: bool = False  # from history, never sent
 
 
+class ModelMonthOut(BaseModel):
+    month: str  # "2026-10"
+    pct: float
+    live: bool  # from the month the model picked it on
+    running: bool  # the month isn't over yet
+
+
+class ModelSummaryOut(BaseModel):
+    """Whole months only; all in percent."""
+    months: int
+    avg: float
+    positive: int
+    worst: float
+    drawdown: float
+    total: float
+
+
+class ModelSincePickOut(BaseModel):
+    days: int
+    total: float
+
+
+class ModelTradesOut(BaseModel):
+    count: int
+    wins: int
+
+
+class ModelChallengeOut(BaseModel):
+    """A model's pick on the app's models page (model_challenge.py)."""
+    id: str
+    model: str
+    picked_at: str
+    asset: str
+    timeframe: str
+    strategy: str
+    rules: list[str]
+    note: str
+    passed: bool
+    test: ModelSummaryOut
+    hold: ModelSummaryOut  # the same money, just held
+    last12_avg: float
+    trades: ModelTradesOut
+    since_pick: ModelSincePickOut
+    next_distance: float  # the next session's orders: this far above and below its open
+    months: list[ModelMonthOut]
+
+
 class RetestSetupOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -500,3 +547,39 @@ class ZoneTouchScanOut(BaseModel):
     universe_count: int
     results: list[ZoneTouchSetupOut]
     sent: bool
+
+
+class PushKeyOut(BaseModel):
+    """The app's Web Push public key (push.py); blank until made."""
+    public_key: str
+
+
+class PushSubscriptionIn(BaseModel):
+    """A phone's push subscription, as the browser's PushSubscription.toJSON() gives it."""
+    endpoint: str
+    keys: dict[str, str] = {}
+
+
+class PriceAlertIn(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    price: float = Field(..., gt=0)
+
+
+class PriceAlertOut(BaseModel):
+    """A price alert still waiting (price_alerts.py)."""
+    id: int
+    symbol: str
+    price: float
+    above: bool  # reached on the way up
+    created_at: datetime  # UTC
+
+
+class MyTradeOut(BaseModel):
+    """One of the user's own trades (my_trades.py): its zone, drawn from start on."""
+    id: int
+    name: str
+    symbol: str  # Yahoo's
+    bottom: float
+    top: float
+    start: datetime  # UTC
+    added_at: datetime  # UTC

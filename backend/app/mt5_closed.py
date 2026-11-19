@@ -1,5 +1,5 @@
 """The MetaTrader 5 trades that closed, each sent once to the Nasdaq bot — the user's ask
-(3/11/26): every trade taken here (strong_zone_1m.py, ema_touch3_5m.py's still open, and
+(3/11/26): every trade taken here (range_grid.py, strong_zone_1m.py, ema_touch3_5m.py, and
 the alerts' if they trade again), once it hit its stop, its target or break even. A picture
 of the candles its strategy trades on from the terminal, the setup it was opened on (the
 zone, its touches and the entry candle — the user's ask, 3/11/26), the trade's box as it
@@ -17,7 +17,7 @@ from typing import Callable, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from . import alert_chart, ema_touch3_5m, mt5_trader, strong_zone_1m, telegram
+from . import alert_chart, ema_touch3_5m, mt5_trader, range_grid, strong_zone_1m, telegram
 from .candles import Candle
 from .config import settings
 from .models import SentAlert
@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 BOT = "nasdaq"
 # The strategy's name in the messages, by magic. The alerts' trades are only the 1h bot's
 # (MT5_BOTS=1h, the user's ask, 4/11/26) — another bot there needs telling apart here.
-STRATEGIES = {strong_zone_1m.MAGIC: "אזורים חזקים + נר דקה", ema_touch3_5m.MAGIC: "EMA 50 + 3 נגיעות", mt5_trader.MAGIC: "פורקס המשך"}
+STRATEGIES = {
+    range_grid.MAGIC: "רשת דשדוש", strong_zone_1m.MAGIC: "אזורים חזקים + נר דקה", ema_touch3_5m.MAGIC: "EMA 50 + 3 נגיעות",
+    mt5_trader.MAGIC: "פורקס המשך",
+}
 MAGICS = tuple(STRATEGIES)
 LOOKBACK_DAYS = 7
 MAX_ALERTS = 20
@@ -160,13 +163,14 @@ def setup_marks(t, candles: Sequence[Candle]) -> dict:
     touches = [_iso(window[k].time) for k in ([a] if strong else [*zone.touch_idx, a]) if k < last]
     return dict(
         zone_bottom=zone.bottom, zone_top=zone.top, zone_start=_iso(window[0].time) if strong else touches[0], touches=touches,
-        breakout=_iso(window[last].time), zone_colors=alert_chart.GOLD,
+        breakout=_iso(window[last].time),
     )
 
 
 def picture(t: ClosedTrade) -> Optional[bytes]:
     """The strategy's candles up to the one it closed in, its setup, the trade's box from
-    the one it opened in."""
+    the one it opened in — in the user's style since 11/11/26 (alert_chart.STYLE: the box
+    without its prices, the setup's marks left out for now)."""
     seconds = bar_seconds(t.magic)
     opened, closed = t.opened - t.opened % seconds, t.closed - t.closed % seconds
     candles = [c for c in t.candles if c.time <= closed]
@@ -176,7 +180,7 @@ def picture(t: ClosedTrade) -> Optional[bytes]:
     return alert_chart.render(
         candles, f"{t.symbol} · {seconds // 60}m · {TITLES[t.outcome]}", direction=t.direction, plan=plan,
         plan_from=_iso(opened), closed=t.outcome, closed_at=_iso(closed), max_bars=MAX_PICTURE_BARS,
-        **setup_marks(t, candles),
+        frame=True, **alert_chart.STYLE, **setup_marks(t, candles),
     )
 
 

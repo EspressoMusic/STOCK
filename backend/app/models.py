@@ -167,3 +167,28 @@ class TrackedTrade(Base):
     outcome = Column(String, index=True)  # None while open | "target" | "stop"
     created_at = Column(DateTime, default=datetime.utcnow)
     closed_at = Column(DateTime)
+
+
+class PushSubscription(Base):
+    """A phone (or browser) that turned on the app's notifications (push.py): where Web Push
+    reaches it and its keys."""
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    endpoint = Column(String, unique=True, nullable=False)
+    p256dh = Column(String, nullable=False)
+    auth = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PriceAlert(Base):
+    """A price the user set on the chart panel (price_alerts.py): once the symbol reaches it,
+    a notification goes to the phone and the alert is done."""
+    __tablename__ = "price_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    price = Column(Float, nullable=False)
+    above = Column(Integer, nullable=False)  # 1 = set above the price then, so reached on the way up
+    created_at = Column(DateTime, default=datetime.utcnow)
+    triggered_at = Column(DateTime, index=True)  # None while waiting

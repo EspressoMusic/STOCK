@@ -8,6 +8,7 @@ import InterestingScreen from "./screens/InterestingScreen";
 import WatchlistScreen from "./screens/WatchlistScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import SignalsScreen from "./screens/SignalsScreen";
+import ModelsScreen from "./screens/ModelsScreen";
 import { LangProvider, useLang } from "./context/LangContext";
 import { NavProvider, useNav } from "./context/NavContext";
 import useReminders from "./hooks/useReminders";
@@ -65,6 +66,7 @@ function AppShell({ auth }) {
         {tab === "chart-scan" && <ChartScanScreen />}
         {tab === "interesting" && <InterestingScreen />}
         {tab === "signals" && <SignalsScreen />}
+        {tab === "models" && <ModelsScreen />}
         {tab === "settings" && (
           <SettingsScreen
             theme={theme}

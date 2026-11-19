@@ -155,13 +155,19 @@ def test_the_picture_gets_the_4h_up_to_the_closed_candle():
     assert signal_at("X", DAILY, d, len(d.m15) - 1).h4 == d.h4[:1]
 
 
-def test_the_picture_has_the_three_timeframes(monkeypatch):
+def test_the_caption_is_only_the_stock_the_side_and_the_link():
+    s = signal(wicks=2)
+    assert stock_day.format_message(s) == stock_day.telegram.alert_caption("X", None, s.direction == "up")
+
+
+def test_the_picture_has_the_two_bigger_timeframes(monkeypatch):
     charts = []
     monkeypatch.setattr(stock_day.alert_chart, "render_side_by_side", lambda *c, **kw: charts.extend(c) or b"png")
     s = signal(wicks=2)
     s.setup = DailySetup("down", DAILY.zone, [1, 3, 5], bars(*[UNDER, TOUCH_TOP] * 3))
     stock_day.picture(s)
-    assert [args[1] for args, _ in charts] == ["X · 1D", "X · 4h", "X · 15m"]
+    assert [args[1] for args, _ in charts] == ["X · 1D", "X · 4h"]
+    assert all(kwargs["ema"] == 50 for _, kwargs in charts)
 
 
 def test_the_alert_opens_no_trade(monkeypatch):

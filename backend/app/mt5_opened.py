@@ -73,7 +73,8 @@ def format_message(t: OpenedTrade) -> str:
 
 def picture(t: OpenedTrade) -> Optional[bytes]:
     """The strategy's candles closed when it opened, its setup, the trade's box from the
-    last one — the entry candle."""
+    last one — the entry candle; in the user's style since 11/11/26 (alert_chart.STYLE: the
+    box without its prices, the setup's marks left out for now)."""
     seconds = bar_seconds(t.magic)
     candles = [c for c in t.candles if c.time + seconds <= t.opened]
     if not candles:
@@ -81,7 +82,7 @@ def picture(t: OpenedTrade) -> Optional[bytes]:
     plan = TradePlan(t.direction, t.entry, t.stop, t.target) if t.stop and t.target else None
     return alert_chart.render(
         candles, f"{t.symbol} · {seconds // 60}m · Entry", direction=t.direction, plan=plan, max_bars=MAX_PICTURE_BARS,
-        **setup_marks(t, candles),
+        frame=True, **alert_chart.STYLE, **setup_marks(t, candles),
     )
 
 

@@ -6,9 +6,11 @@ box green, the stop's red. Once the trade is over (trade_tracker.py), it's drawn
 entry candle to the one that reached the target or the stop, which is marked. An example
 from the past is drawn with the rest of its day after the entry (the user's ask, 2/11/26).
 
-Candles sit one per slot with no gaps for weekends or closed hours, as on the chart.
-Text stays Latin: matplotlib doesn't lay out Hebrew right to left."""
+Candles sit one per slot with no gaps for weekends or closed hours, as on the chart; a
+picture may also close the price gaps between them (draw's gapless) and be framed in black
+(render_side_by_side's frame). Text stays Latin: matplotlib doesn't lay out Hebrew right to left."""
 import io
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 from zoneinfo import ZoneInfo
@@ -37,8 +39,7 @@ GRID = "#eceff3"
 TEXT = "#374151"
 TARGET = "#089981"
 STOP = "#f23645"
-TARGET_FILL = (8 / 255, 153 / 255, 129 / 255, 0.2)
-STOP_FILL = (242 / 255, 54 / 255, 69 / 255, 0.2)
+PLAN_ALPHA = 0.2  # the trade's boxes' fill
 ENTRY = "#131722"
 # Candles shown before the first marked one, and the fewest / most shown in all.
 LEAD_BARS = 15
@@ -58,6 +59,21 @@ STOCH_LEVELS = (20, 80)
 # The thick line between charts side by side, when asked for, and the room left for it.
 DIVIDER_WIDTH = 6
 DIVIDER_PAD = 4
+FRAME_PAD = 2  # the room inside the black frame around a picture, in font sizes
+CANDLE_EDGE_WIDTH = 4  # draw's candle_edge, in points — at most this share of a body's width:
+CANDLE_EDGE_SHARE = 0.45
+# The user's style for every bot's pictures (their asks, 11/11/26, on the weekly stocks bot's
+# first), as draw()'s options: beige, no gap between the candles, each outlined in thick
+# soft black, a rising one soft blue, a falling one the outline's soft black — the trade's
+# target and stop boxes too —, the zone soft grey, the EMA 50 on every chart, thick and black,
+# and plain — no grid, title, numbers or marks. The picture framed in black too (frame); the
+# bigger timeframe always on the left.
+SOFT_BLUE, MATTE_BLACK = "#8fb3dc", "#4a4a4a"
+STYLE = dict(
+    gapless=True, plain=True, background="#f3ead7", candle_edge=MATTE_BLACK,
+    candle_colors=(SOFT_BLUE, MATTE_BLACK), plan_colors=(SOFT_BLUE, MATTE_BLACK), plan_alpha=0.5,
+    zone_colors=((0.5, 0.5, 0.5, 0.2), (0.45, 0.45, 0.45, 0.55)), ema=50, line_color="black", line_width=2.6,
+)
 
 
 def rest_of_day(candles: Sequence[Candle], i: int) -> list[Candle]:
@@ -70,6 +86,26 @@ def rest_of_day(candles: Sequence[Candle], i: int) -> list[Candle]:
         if datetime.fromtimestamp(c.time, tz).date() != day:
             break
         out.append(c)
+    return out
+
+
+def ema_of(candles: Sequence[Candle], period: int) -> list[float]:
+    """The closes' EMA, aligned with candles — as pandas' ewm(span=period, adjust=False)."""
+    k = 2 / (period + 1)
+    out: list[float] = []
+    for c in candles:
+        out.append(c.close if not out else out[-1] + k * (c.close - out[-1]))
+    return out
+
+
+def filled_gaps(candles: Sequence[Candle]) -> list[Candle]:
+    """Each candle opening at the close before it, its wick stretched to reach there (the
+    user's ask, 11/11/26: no gap between the candles) — the closes, and so the indicators
+    on them, unchanged."""
+    out = list(candles[:1])
+    for c in candles[1:]:
+        o = out[-1].close
+        out.append(replace(c, open=o, high=max(c.high, o), low=min(c.low, o)))
     return out
 
 
@@ -87,15 +123,16 @@ def _number(ax, number: int, x: int, y: float, below: bool) -> None:
     )
 
 
-def _panel(ax):
+def _panel(ax, background: str = "white", plain: bool = False):
     """A panel under ax, with the time axis moved down to it."""
     panel = make_axes_locatable(ax).append_axes("bottom", size="28%", pad=0.15, sharex=ax)
     ax.tick_params(labelbottom=False)
-    panel.set_facecolor("white")
+    panel.set_facecolor(background)
     for side in ("top", "left"):
         panel.spines[side].set_visible(False)
     for side in ("right", "bottom"):
         panel.spines[side].set_color(GRID)
+        panel.spines[side].set_visible(not plain)
     panel.yaxis.tick_right()
     panel.tick_params(colors=TEXT, labelsize=8, length=0)
     return panel
@@ -136,6 +173,16 @@ def draw(
     line2: Sequence[float] = (),
     volume: Optional[tuple[float, int]] = None,
     lead_bars: int = LEAD_BARS,
+    gapless: bool = False,
+    plain: bool = False,
+    background: str = "white",
+    candle_edge: Optional[str] = None,
+    candle_colors: tuple[str, str] = (UP, DOWN),
+    plan_colors: tuple[str, str] = (TARGET, STOP),
+    plan_alpha: float = PLAN_ALPHA,
+    ema: Optional[int] = None,
+    line_color: str = LINE,
+    line_width: float = 1.3,
 ) -> None:
     """The alert's chart, onto ax. The times are the alert's own ISO candle times; the
     zone is drawn from zone_start (or the left edge, if that's further back) onward, if
@@ -159,7 +206,16 @@ def draw(
     goes on the side of its candle the price is on. line2 is a second indicator, in LINE2.
     volume is (a usual day's volume, the last candle's number): a volume panel under the
     candles, the usual day dashed and the last candle's bar numbered. lead_bars are the
-    candles shown before the first marked one."""
+    candles shown before the first marked one. gapless draws each candle from the close
+    before it (filled_gaps); plain leaves out the grid, the title, the numbers — prices,
+    times, the trade's labels —, the last price's line and label, the indicator's name and
+    the marks — the arrow, dots, boxes, numbers and legend, which still frame the view (the
+    user's asks, 11/11/26);
+    background is the chart's colour (its panels' too); candle_edge outlines each candle and
+    colours its wick, both thick; candle_colors are the rising and falling candles' colours,
+    plan_colors the trade's target and stop boxes', filled plan_alpha opaque. ema is the period of an EMA of the
+    candles (and after) drawn as line, unless line is given — kept in view. line is drawn
+    in line_color, line_width points thick."""
     end = len(candles)  # the view is framed on the candles up to here, after added on the right
     if after:
         entry = candles[-1]
@@ -168,6 +224,10 @@ def draw(
         plan_from = plan_from or datetime.fromtimestamp(entry.time, timezone.utc).isoformat()
         if hit:
             closed, closed_at = hit[0], datetime.fromtimestamp(hit[1], timezone.utc).isoformat()
+    if gapless:
+        candles = filled_gaps(candles)
+    if ema and not line:
+        line = ema_of(candles, ema)
     times = [breakout, *retests, *touches, plan_from, *(t for box in boxes for t in box), level[1] if level else None,
              *(t for t, _ in numbers)]
     marks = [i for i in (_index(candles, t) for t in times if t) if i is not None]
@@ -180,13 +240,15 @@ def draw(
         i = _index(candles, iso) if iso else None
         return None if i is None or i < lo else i - lo
 
-    ax.set_facecolor("white")
-    ax.grid(True, color=GRID, linewidth=0.8)
+    ax.set_facecolor(background)
+    if not plain:
+        ax.grid(True, color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     for side in ("top", "left"):
         ax.spines[side].set_visible(False)
     for side in ("right", "bottom"):
         ax.spines[side].set_color(GRID)
+        ax.spines[side].set_visible(not plain)
     ax.yaxis.tick_right()
     ax.tick_params(colors=TEXT, labelsize=8, length=0)
 
@@ -209,12 +271,12 @@ def draw(
     if has_zone:
         draw_zone(at(zone_start) or 0, zone_bottom, zone_top, *zone_colors)
     for bottom, top in extra_zones:
-        draw_zone(0, bottom, top)
+        draw_zone(0, bottom, top, *zone_colors)
     if line:
-        ax.plot(range(len(line) - lo), line[lo:], color=LINE, linewidth=1.3, zorder=4)
+        ax.plot(range(len(line) - lo), line[lo:], color=line_color, linewidth=line_width, zorder=4)
     if line2:
         ax.plot(range(len(line2) - lo), line2[lo:], color=LINE2, linewidth=1.3, zorder=4)
-    for first_t, last_t in boxes:
+    for first_t, last_t in [] if plain else boxes:
         x1, x2 = at(first_t), at(last_t)
         if x1 is None or x2 is None:
             continue
@@ -231,17 +293,22 @@ def draw(
 
     width = 0.7
     thinnest = (zone_top - zone_bottom) * 0.02 if has_zone else span * 0.002
+    rise, fall = candle_colors
+    # The outline thick, but a small share of a body however many candles are shown.
+    slot = ax.get_window_extent().width * 72 / ax.figure.dpi / (right + 1)
+    edge_width = min(CANDLE_EDGE_WIDTH, width * slot * CANDLE_EDGE_SHARE)
     for x, c in enumerate(shown):
-        color = UP if c.close >= c.open else DOWN
-        ax.plot([x, x], [c.low, c.high], color=color, linewidth=0.9, zorder=2)
+        color = rise if c.close >= c.open else fall
+        ax.plot([x, x], [c.low, c.high], color=candle_edge or color, linewidth=edge_width if candle_edge else 0.9, zorder=2)
         body = max(abs(c.close - c.open), thinnest)
         ax.add_patch(Rectangle(
-            (x - width / 2, min(c.open, c.close)), width, body, facecolor=color, edgecolor=color, zorder=3,
+            (x - width / 2, min(c.open, c.close)), width, body, facecolor=color, edgecolor=candle_edge or color,
+            linewidth=edge_width if candle_edge else None, zorder=3,
         ))
 
     gap = span * 0.03
     b = at(breakout)
-    if b is not None:
+    if b is not None and not plain:
         c = shown[b]
         up = direction != "down"
         # Over the trade's labels: a stop just past the entry candle puts its label on it.
@@ -249,7 +316,7 @@ def draw(
             [b], [c.low - gap if up else c.high + gap], marker="^" if up else "v",
             s=90, color=arrow_color, zorder=6.5, edgecolors="white", linewidths=0.8,
         )
-    for t in [*retests, *touches]:
+    for t in [] if plain else [*retests, *touches]:
         x = at(t)
         if x is None:
             continue
@@ -261,7 +328,7 @@ def draw(
             s=55, color=TOUCH, zorder=5, edgecolors="white", linewidths=0.8,
         )
 
-    for number, (t, price) in enumerate(numbers, 1):
+    for number, (t, price) in enumerate([] if plain else numbers, 1):
         x = at(t)
         if x is None:
             continue
@@ -271,14 +338,16 @@ def draw(
         _number(ax, number, x, price - past if below else price + past, below)
 
     if plan:
+        plan_labels = plan_labels and not plain
         mid = x0 + plan_bars / 2
-        for edge, fill in ((plan.target, TARGET_FILL), (plan.stop, STOP_FILL)):
+        target_color, stop_color = plan_colors
+        for edge, color in ((plan.target, target_color), (plan.stop, stop_color)):
             ax.add_patch(Rectangle(
-                (x0, min(plan.entry, edge)), plan_bars, abs(edge - plan.entry), facecolor=fill, edgecolor="none",
-                zorder=1.5,
+                (x0, min(plan.entry, edge)), plan_bars, abs(edge - plan.entry), facecolor=to_rgba(color, plan_alpha),
+                edgecolor="none", zorder=1.5,
             ))
         ax.plot([x0, x0 + plan_bars], [plan.entry, plan.entry], color=ENTRY, linewidth=1, zorder=4)
-        for label, edge, color in (("Target", plan.target, TARGET), ("Stop", plan.stop, STOP)):
+        for label, edge, color in (("Target", plan.target, target_color), ("Stop", plan.stop, stop_color)):
             if closed == label.lower():
                 label += " hit"
                 ax.scatter([hit_x], [edge], marker="X", s=130, color=color, zorder=7, edgecolors="white", linewidths=1)
@@ -298,35 +367,41 @@ def draw(
                 fontsize=8, color="white", zorder=6, bbox=dict(boxstyle="round,pad=0.3", facecolor=ENTRY, edgecolor="none"),
             )
 
-    if not closed:
+    if not closed and not plain:
         last = shown[-1].close
-        ax.axhline(last, color=UP if last >= shown[-1].open else DOWN, linewidth=0.8, linestyle="--", zorder=4)
+        ax.axhline(last, color=rise if last >= shown[-1].open else fall, linewidth=0.8, linestyle="--", zorder=4)
         ax.annotate(
             f"{last:g}", xy=(1, last), xycoords=("axes fraction", "data"), xytext=(4, 0),
             textcoords="offset points", va="center", fontsize=8, color="white",
-            bbox=dict(boxstyle="square,pad=0.25", facecolor=UP if last >= shown[-1].open else DOWN, edgecolor="none"),
+            bbox=dict(boxstyle="square,pad=0.25", facecolor=rise if last >= shown[-1].open else fall, edgecolor="none"),
             annotation_clip=False,
         )
 
     tz = ZoneInfo(settings.alert_timezone)
     step = max(1, n // time_labels)
     ticks = list(range(0, n, step))
-    ax.set_xticks(ticks)
-    ax.set_xticklabels([datetime.fromtimestamp(shown[i].time, tz).strftime(time_format) for i in ticks])
+    ax.set_xticks([] if plain else ticks)
+    if not plain:
+        ax.set_xticklabels([datetime.fromtimestamp(shown[i].time, tz).strftime(time_format) for i in ticks])
+    else:
+        ax.set_yticks([])
     ax.set_xlim(-1, right)
     levels = [plan.stop, plan.target] if plan else []
+    if ema:
+        levels += [v for v in line[lo:] if v == v]
     low = min([c.low for c in shown] + [bottom for bottom, _ in extra_zones] + levels)
     high = max([c.high for c in shown] + [top for _, top in extra_zones] + levels)
     ax.set_ylim(low - span * 0.08, high + span * 0.08)
-    ax.set_title(title, loc="left", fontsize=12, color=TEXT, fontweight="bold")
-    if legend:
+    if not plain:
+        ax.set_title(title, loc="left", fontsize=12, color=TEXT, fontweight="bold")
+    if legend and not plain:
         ax.legend(
             handles=[Patch(facecolor=color, edgecolor=color, label=label) for label, color in legend],
             loc="best", fontsize=8, framealpha=0.85,
         )
 
     if stoch:
-        osc = _panel(ax)
+        osc = _panel(ax, background, plain)
         osc.axhspan(*STOCH_LEVELS, color=GRID, alpha=0.6, zorder=0)
         for level in STOCH_LEVELS:
             osc.axhline(level, color=TEXT, linewidth=0.6, linestyle="--", alpha=0.5, zorder=1)
@@ -334,12 +409,13 @@ def draw(
         osc.plot(range(len(k) - lo), list(k[lo:]), color=STOCH_K, linewidth=1.1, zorder=3)
         osc.plot(range(len(d) - lo), list(d[lo:]), color=STOCH_D, linewidth=1.1, zorder=2)
         osc.set_ylim(-5, 105)
-        osc.set_yticks(STOCH_LEVELS)
-        osc.text(0.005, 0.95, "Stoch RSI 14 14 3 3", transform=osc.transAxes, fontsize=8, color=TEXT, va="top")
+        osc.set_yticks([] if plain else STOCH_LEVELS)
+        if not plain:
+            osc.text(0.005, 0.95, "Stoch RSI 14 14 3 3", transform=osc.transAxes, fontsize=8, color=TEXT, va="top")
 
     if volume:
         usual, number = volume
-        vol = _panel(ax)
+        vol = _panel(ax, background, plain)
         bars = [c.volume or 0 for c in shown]
         vol.bar(range(n), bars, width=width, color=[to_rgba(UP if c.close >= c.open else DOWN, 0.45) for c in shown], zorder=2)
         vol.bar(n - 1, bars[-1], width=width, color=NUMBER, zorder=3)
@@ -352,15 +428,21 @@ def draw(
 
 def _png(
     panels: Sequence[tuple[tuple, dict]], size: tuple[float, float], divider: bool = False,
-    widths: Optional[Sequence[float]] = None,
+    widths: Optional[Sequence[float]] = None, frame: bool = False,
 ) -> bytes:
-    fig = Figure(figsize=size, dpi=110, facecolor="white")
+    # The picture in its first chart's colour.
+    fig = Figure(figsize=size, dpi=110, facecolor=panels[0][1].get("background", "white"))
     FigureCanvasAgg(fig)
     grid = fig.add_gridspec(1, len(panels), width_ratios=widths)
     axes = [fig.add_subplot(grid[0, i]) for i in range(len(panels))]
     for ax, (args, kwargs) in zip(axes, panels):
         draw(ax, *args, **kwargs)
-    fig.tight_layout(w_pad=DIVIDER_PAD if divider else None)
+    fig.tight_layout(pad=FRAME_PAD if frame else 1.08, w_pad=DIVIDER_PAD if divider else None)
+    if frame:
+        # On the picture's edges, as thick as the divider (half of it is past the edge).
+        fig.add_artist(Rectangle(
+            (0, 0), 1, 1, transform=fig.transFigure, fill=False, edgecolor="black", linewidth=2 * DIVIDER_WIDTH,
+        ))
     if divider:
         renderer = fig.canvas.get_renderer()
         for left, right in zip(axes, axes[1:]):
@@ -372,16 +454,18 @@ def _png(
     return buf.getvalue()
 
 
-def render(*args, **kwargs) -> bytes:
-    """PNG of the alert's chart; draw()'s arguments, without ax."""
-    return _png([(args, kwargs)], (10, 5.6))
+def render(*args, frame: bool = False, **kwargs) -> bytes:
+    """PNG of the alert's chart; draw()'s arguments, without ax. frame draws a thick black
+    line around it."""
+    return _png([(args, kwargs)], (10, 5.6), frame=frame)
 
 
 def render_side_by_side(
     *charts: tuple[tuple, dict], size: tuple[float, float] = (16, 6), divider: bool = False,
-    widths: Optional[Sequence[float]] = None,
+    widths: Optional[Sequence[float]] = None, frame: bool = False,
 ) -> bytes:
     """PNG of charts side by side, each draw()'s (arguments, keyword arguments) without
-    ax — one setup on a few timeframes. divider draws a thick black line between them;
-    widths are the charts' relative widths, equal if not given."""
-    return _png(charts, size, divider, widths)
+    ax — one setup on a few timeframes. divider draws a thick black line between them,
+    frame one around the picture — both, and each chart is boxed in black; widths are the
+    charts' relative widths, equal if not given."""
+    return _png(charts, size, divider, widths, frame)

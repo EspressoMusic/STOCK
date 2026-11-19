@@ -12,7 +12,7 @@ def test_the_weekly_rules_on_monthly_candles_with_their_own_key():
     candles = weeks(CLOSES)  # the spacing doesn't matter to the rules
     k = k_with(len(candles), 10)
     s = monthly_zone._signal("LLY", None, candles, k, k, ENTRY)
-    assert s.direction == "up" and s.plan.entry == 104.5
+    assert s.direction == "up" and s.plan.entry == 102
     assert s.key == f"monthly:LLY:{candles[ENTRY].time}"
 
 

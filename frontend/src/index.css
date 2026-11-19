@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Varela+Round&display=swap");
 
 :root {
   /* Vitrack palette — warm cream/gold, thick ink borders, hard offset shadows */
@@ -168,7 +168,9 @@ html, body {
   overscroll-behavior: none;
   background: var(--ground-deep);
   color: var(--text);
-  font-family: "Merriweather Sans", "Segoe UI", "Heebo", -apple-system, system-ui, sans-serif;
+  font-family: "Varela Round", "Segoe UI", "Heebo", -apple-system, system-ui, sans-serif;
+  /* Varela Round has one weight; keep it as is instead of a fake bold */
+  font-synthesis-weight: none;
   transition: background-color 0.15s, color 0.15s;
 }
 
@@ -4142,6 +4144,137 @@ html, body {
 
 [data-skin="mt5"] .mt5-summary-value.is-down {
   color: var(--down);
+}
+
+/* ---------- models page (ModelsScreen) ---------- */
+.model-pick {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.model-pick dt {
+  color: var(--ink-faint);
+}
+
+.model-pick dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.model-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.model-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.model-stat-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+}
+
+.model-stat-label {
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
+.model-card .is-up {
+  color: var(--up);
+}
+
+.model-card .is-down {
+  color: var(--down);
+}
+
+.model-line {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.model-line b {
+  display: inline-block;
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-months {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-year {
+  display: grid;
+  grid-template-columns: 30px repeat(12, 1fr);
+  gap: 2px;
+  align-items: center;
+}
+
+.model-year-label {
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
+.model-month {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--ground-deep);
+  color: var(--ink-soft);
+}
+
+.model-month.is-up {
+  background: var(--up-bg);
+}
+
+.model-month.is-down {
+  background: var(--down-bg);
+}
+
+.model-month.is-empty {
+  background: none;
+}
+
+.model-month.is-live {
+  outline: 1.5px solid var(--ink);
+  outline-offset: -1.5px;
+}
+
+.model-legend {
+  margin: -4px 0 0;
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+}
+
+.model-rules {
+  margin: 0;
+  padding-inline-start: 20px;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* ---------- signals page (SignalsScreen) ---------- */

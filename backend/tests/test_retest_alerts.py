@@ -134,4 +134,4 @@ def test_forex_pair_shows_its_name_and_opens_on_tradingview():
     s.name = "GBP/CHF"
     text = retest_alerts.format_message(s)
     assert "<b>GBP/CHF</b>" in text
-    assert 'href="https://www.tradingview.com/chart/?symbol=GBPCHF"' in text
+    assert 'href="https://www.tradingview.com/chart/?symbol=OANDA%3AGBPCHF"' in text

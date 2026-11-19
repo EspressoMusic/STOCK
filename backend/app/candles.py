@@ -12,7 +12,7 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-VALID_CANDLE_TIMEFRAMES = ("5m", "15m", "30m", "1h", "4h", "1d", "1w")
+VALID_CANDLE_TIMEFRAMES = ("5m", "15m", "30m", "1h", "4h", "1d", "1w", "1mo")
 DEFAULT_CANDLE_TIMEFRAME = "1h"
 MAX_CANDLES = 500
 
@@ -29,6 +29,7 @@ _FETCH_PARAMS = {
     "4h": ("1h", "2y"),  # resampled to 4h below
     "1d": ("1d", "2y"),
     "1w": ("1wk", "10y"),
+    "1mo": ("1mo", "max"),
 }
 
 # Short-lived cache so switching timeframes/symbols back and forth (or
@@ -50,21 +51,22 @@ class Candle:
 
 
 def _to_candles(df: pd.DataFrame) -> list[Candle]:
-    out: list[Candle] = []
-    for ts, row in df.iterrows():
-        if row[["Open", "High", "Low", "Close"]].isna().any():
-            continue
-        out.append(
-            Candle(
-                time=int(ts.timestamp()),
-                open=round(float(row["Open"]), 5),
-                high=round(float(row["High"]), 5),
-                low=round(float(row["Low"]), 5),
-                close=round(float(row["Close"]), 5),
-                volume=int(row["Volume"]) if "Volume" in row and pd.notna(row["Volume"]) else None,
-            )
+    # Column by column, not iterrows: 60 days of 5m bars are ~13k rows, and iterrows took
+    # ~12s of CPU on them — every chart request in the panel waited behind it (15/11/26).
+    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+    ohlc = df[["Open", "High", "Low", "Close"]].to_numpy(dtype=float).tolist()
+    volumes = df["Volume"].tolist() if "Volume" in df.columns else [None] * len(df)
+    return [
+        Candle(
+            time=int(ts.timestamp()),
+            open=round(o, 5),
+            high=round(h, 5),
+            low=round(lo, 5),
+            close=round(c, 5),
+            volume=int(v) if pd.notna(v) else None,
         )
-    return out
+        for ts, (o, h, lo, c), v in zip(df.index, ohlc, volumes)
+    ]
 
 
 def get_4h_dataframe(symbol: str, period: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -116,6 +118,34 @@ def group_4h(df: pd.DataFrame) -> pd.DataFrame:
     return out.dropna(subset=["Open", "High", "Low", "Close"])
 
 
+def _forex_daily_candles(symbol: str) -> list[Candle]:
+    """Yahoo's own daily forex bars open next to their close — every day a doji with long
+    wicks (15/11/26) — so these are built from 1h bars on the forex day, as the alerts'
+    daily candles are (daily_candle.py), stamped at the day's midnight UTC."""
+    from .daily_candle import _forex_day  # imported here: daily_candle imports this module
+
+    try:
+        df = yf.Ticker(symbol).history(interval="1h", period="2y")
+    except Exception:
+        logger.warning("Candle fetch failed for %s (1d from 1h)", symbol)
+        return []
+    if df is None or df.empty:
+        return []
+    out = (
+        df.assign(_day=[_forex_day(ts) for ts in df.index])
+        .groupby("_day", sort=True)
+        .agg(
+            Open=("Open", "first"),
+            High=("High", "max"),
+            Low=("Low", "min"),
+            Close=("Close", "last"),
+            Volume=("Volume", "sum"),
+        )
+    )
+    out.index = pd.to_datetime(out.index).tz_localize("UTC")
+    return _to_candles(out)[-MAX_CANDLES:]
+
+
 def get_candles(symbol: str, timeframe: str = DEFAULT_CANDLE_TIMEFRAME) -> list[Candle]:
     if timeframe not in VALID_CANDLE_TIMEFRAMES:
         raise ValueError(f"timeframe must be one of {VALID_CANDLE_TIMEFRAMES}")
@@ -130,6 +160,8 @@ def get_candles(symbol: str, timeframe: str = DEFAULT_CANDLE_TIMEFRAME) -> list[
     if timeframe == "4h":
         df = get_4h_dataframe(symbol)
         candles = _to_candles(df)[-MAX_CANDLES:] if df is not None else []
+    elif timeframe == "1d" and symbol.endswith("=X"):
+        candles = _forex_daily_candles(symbol)
     else:
         interval, period = _FETCH_PARAMS[timeframe]
         try:

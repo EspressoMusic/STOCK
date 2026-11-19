@@ -8,3 +8,9 @@ createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 )
+
+// The app's notifications on the phone (public/sw.js, hooks/usePush.js); browsers allow
+// it only over https or on localhost.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {})
+}

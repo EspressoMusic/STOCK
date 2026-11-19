@@ -50,7 +50,7 @@ _run_lock = threading.Lock()
 
 
 def _signal(symbol: str, name: Optional[str], candles: Sequence[Candle], k, d, i: int) -> Optional[Signal]:
-    got = signal_at(candles, k, i)
+    got = signal_at(candles, i, k)
     if got is None:
         return None
     direction, zone, a, trade = got

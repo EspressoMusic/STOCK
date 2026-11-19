@@ -54,7 +54,7 @@ from .candles import Candle, _to_candles, group_4h
 from .config import settings
 from .daily_candle import confirms, daily_candles
 from .daily_zone_30m import day_so_far
-from .daily_zone_4h import BOT, DAILY_MIN_TOUCHES, DAILY_WINDOW, STRONG_TAG, UNIVERSE
+from .daily_zone_4h import BOT, DAILY_MIN_TOUCHES, DAILY_WINDOW, UNIVERSE
 from .nasdaq_scalp import ema_series
 from .technical_scan import _round_sig
 from .zone_touch_scan import send_new
@@ -86,15 +86,12 @@ TYPICAL_BARS = 200
 VISIT_BARS = 96
 # The alert comes within this many candles of the break (my default: two days).
 MAX_WAIT = 48
-# Candles shown on each chart, up to the alert: zoomed in (the user, 8/11/26), four days of 4h, a
-# day and a bit of 1h — more when the break is further back, with BREAK_LEAD before it. The
-# daily one shows the zone's turns, at least DAILY_SHOWN days.
+# Candles shown on each chart, up to the alert: zoomed in (the user, 8/11/26), four days of 4h.
+# The daily one shows the zone's turns, at least DAILY_SHOWN days. Two charts, the 1h left out
+# (the user's ask, 11/11/26: only the two bigger timeframes).
 SHOWN_4H = 24
-SHOWN_1H = 30
-BREAK_LEAD = 5
 DAILY_SHOWN = 40
-PICTURE_SIZE = (19, 6)
-WIDTHS = (0.8, 1, 1)  # daily, 4h, 1h
+PICTURE_SIZE = (16, 6)
 SEND_INTERVAL_SECONDS = 1.1
 
 OPPOSITE = {"down": "up", "up": "down"}
@@ -363,7 +360,7 @@ def history_setups(
 
 
 def format_message(s: ZoneSetup, example: bool = False) -> str:
-    text = telegram.alert_caption(s.symbol, s.name, s.direction == "up", STRONG_TAG if s.strong else "")
+    text = telegram.alert_caption(s.symbol, s.name, s.direction == "up")  # no tag (the user's ask, 11/11/26)
     if example:
         when = datetime.fromisoformat(s.time) + timedelta(seconds=BAR_SECONDS)
         text += f"\n🕘 דוגמה מההיסטוריה · {when.astimezone(ZoneInfo(settings.alert_timezone)):%d/%m %H:%M}"
@@ -371,24 +368,20 @@ def format_message(s: ZoneSetup, example: bool = False) -> str:
 
 
 def render(s: ZoneSetup) -> bytes:
-    """The daily, 4h and 1h charts, each with the daily zone: on the daily one its turns and the
-    return circled, on the 1h one the break and the alert boxed."""
+    """The daily and 4h charts, each with the daily zone, the daily one framed on its turns and
+    the return — in the user's style since 11/11/26 (alert_chart.STYLE)."""
     title = s.name or s.symbol
-    zone = [(s.zone_bottom, s.zone_top)]
+    style = alert_chart.STYLE
     return alert_chart.render_side_by_side(
         ((s.candles_1d, f"{title} · 1d", s.zone_bottom, s.zone_top, None), dict(
-            touches=[*s.turns, _iso(s.candles_1d[-1].time)], legend=[("Strong daily zone", alert_chart.ZONE_LINE)],
+            style, touches=[*s.turns, _iso(s.candles_1d[-1].time)],
             time_format="%d/%m", time_labels=4, min_bars=DAILY_SHOWN, max_bars=DAILY_WINDOW + 1, lead_bars=3,
         )),
         ((s.candles_4h, f"{title} · 4h", None, None, None), dict(
-            extra_zones=zone, time_format="%d/%m\n%H:%M", time_labels=5, min_bars=SHOWN_4H, max_bars=SHOWN_4H,
+            style, extra_zones=[(s.zone_bottom, s.zone_top)], time_format="%d/%m\n%H:%M", time_labels=5,
+            min_bars=SHOWN_4H, max_bars=SHOWN_4H,
         )),
-        ((s.candles_1h, f"{title} · 1h", None, None, None), dict(
-            extra_zones=zone, boxes=[(s.broke, s.broke), (s.time, s.time)], after=s.after,
-            time_format="%d/%m\n%H:%M", time_labels=5, min_bars=SHOWN_1H, max_bars=MAX_WAIT + BREAK_LEAD + 1,
-            lead_bars=BREAK_LEAD,
-        )),
-        size=PICTURE_SIZE, divider=True, widths=WIDTHS,
+        size=PICTURE_SIZE, divider=True, frame=True,
     )
 
 

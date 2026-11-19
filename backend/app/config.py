@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     telegram_penny_chat_id: str = ""
     telegram_scalp_chat_id: str = ""
     telegram_ema_chat_id: str = ""
+    # Notifications on the phone from the app itself (app/push.py): the Web Push key pair,
+    # made once by `python -m app.push`, and who sends them (an https URL or a mailto:).
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:alerts@example.com"
     # The stocks' 4h alerts, types 1 and 2 (app/tight_touch_scan.py): after each of the
     # session's two 4h candles. The pairs' 4h alerts run on their own 4h closes.
     stock_tight_touch_alert_times: str = "13:35,16:05"
@@ -100,6 +105,10 @@ class Settings(BaseSettings):
     # (frontend AlertChartModal). The live site, so the link opens on the phone too; for the
     # local one use 127.0.0.1, not localhost: Telegram silently drops links to "localhost".
     alert_chart_url: str = "https://stock-one-flax.vercel.app/"
+    # The user's own trades (app/my_trades.py): the chart panel their Telegram links open (the
+    # live site, so the phone opens it too), and the bot they go to.
+    my_trades_url: str = "https://stock-one-flax.vercel.app/tv.html"
+    my_trades_bot: str = "scalp"
 
     # MetaTrader 5 (app/mt5_trader.py): trades on the terminal logged in on this computer.
     # "off" | "paper" (only logged) | "trade" (demo only, unless mt5_allow_real).

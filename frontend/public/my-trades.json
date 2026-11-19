@@ -1,0 +1,7 @@
+[
+  {"id": 1, "name": "XAUUSD", "symbol": "GC=F", "bottom": 3875, "top": 3905, "start": "2026-11-13T09:00:00+00:00", "added_at": "2026-11-18T22:30:00+00:00"},
+  {"id": 2, "name": "EURGBP", "symbol": "EURGBP=X", "bottom": 0.83235, "top": 0.83295, "start": "2026-11-16T04:00:00+00:00", "added_at": "2026-11-18T22:30:00+00:00"},
+  {"id": 3, "name": "AUDCHF", "symbol": "AUDCHF=X", "bottom": 0.56585, "top": 0.5667, "start": "2026-11-17T00:00:00+00:00", "added_at": "2026-11-18T22:40:00+00:00"},
+  {"id": 4, "name": "BTCUSD", "symbol": "BTC-USD", "bottom": 64156.49, "top": 65450.61, "start": "2026-11-16T00:00:00+00:00", "added_at": "2026-11-18T22:50:00+00:00"},
+  {"id": 5, "name": "EURAUD", "symbol": "EURAUD=X", "bottom": 1.6288, "top": 1.6339, "start": "2026-11-16T06:00:00+00:00", "added_at": "2026-11-19T06:30:49+00:00"}
+]

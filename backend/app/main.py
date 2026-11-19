@@ -29,11 +29,12 @@ from .schemas import (
     DailyDigestIn, DailyDigestOut,
     GoogleAuthIn, AuthResultOut, UserOut,
     ZoneTrainingIn, ZoneTrainingOut,
-    RetestAlertScanOut, ZoneTouchScanOut, SignalOut,
+    RetestAlertScanOut, ZoneTouchScanOut, SignalOut, ModelChallengeOut,
+    PushKeyOut, PushSubscriptionIn, PriceAlertIn, PriceAlertOut, MyTradeOut,
 )
 from .pipeline import run_scan
 from .scheduler import start_scheduler, next_run_times
-from . import signal_log, status_bot
+from . import model_challenge, my_trades, price_alerts, push, signal_log, status_bot
 from .technical_scan import (
     scan_technical_signals, DEFAULT_TIMEFRAME, scan_ema50_breakout, scan_ema50_touch_4h,
     scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_4h, scan_stoch_extreme_daily_4h,
@@ -457,7 +458,7 @@ def trigger_zone_touch_scan():
 @app.get("/api/candles", response_model=CandlesOut)
 def candles(
     symbol: str = Query(..., min_length=1),
-    timeframe: str = Query(DEFAULT_CANDLE_TIMEFRAME, pattern="^(5m|15m|30m|1h|4h|1d|1w)$"),
+    timeframe: str = Query(DEFAULT_CANDLE_TIMEFRAME, pattern="^(5m|15m|30m|1h|4h|1d|1w|1mo)$"),
 ):
     data = get_candles(symbol.upper(), timeframe)
     if not data:
@@ -525,7 +526,7 @@ def list_signals(kind: str = Query(...), limit: int = Query(5000, ge=1, le=20000
     return [
         SignalOut(
             id=r.id, kind=r.kind, symbol=r.symbol, name=r.name, direction=r.direction, strong=bool(r.strong),
-            details=r.details, has_picture=bool(r.has_picture), tradingview=tradingview_url(r.symbol),
+            details=r.details, has_picture=bool(r.has_picture), tradingview=tradingview_url(r.symbol, lookup=False),
             created_at=r.created_at.replace(tzinfo=timezone.utc), example=bool(r.example),
         )
         for r in signal_log.latest(db, kind, limit)
@@ -538,6 +539,73 @@ def signal_picture(signal_id: int):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No picture for this signal")
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+
+# Notifications on the phone from the app (push.py): the settings screen turns them on, the
+# strategies' alerts and the price alerts below go to them.
+@app.get("/api/push/key", response_model=PushKeyOut)
+def push_key():
+    return PushKeyOut(public_key=settings.vapid_public_key)
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(req: PushSubscriptionIn, db: Session = Depends(get_db)):
+    if not req.keys.get("p256dh") or not req.keys.get("auth"):
+        raise HTTPException(status_code=400, detail="The subscription has no keys")
+    push.subscribe(db, req.endpoint, req.keys["p256dh"], req.keys["auth"])
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(req: PushSubscriptionIn, db: Session = Depends(get_db)):
+    push.unsubscribe(db, req.endpoint)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+def push_test():
+    if not push.is_configured():
+        raise HTTPException(status_code=503, detail="Push keys aren't set (python -m app.push)")
+    push.send("✅ ההתראות פועלות", "מכאן יגיעו האיתותים והתראות המחיר", tag="test")
+    return {"ok": True}
+
+
+# The chart panel's price alerts (price_alerts.py).
+def _price_alert_out(a) -> PriceAlertOut:
+    return PriceAlertOut(
+        id=a.id, symbol=a.symbol, price=a.price, above=bool(a.above), created_at=a.created_at.replace(tzinfo=timezone.utc)
+    )
+
+
+@app.get("/api/price-alerts", response_model=list[PriceAlertOut])
+def list_price_alerts(db: Session = Depends(get_db)):
+    return [_price_alert_out(a) for a in price_alerts.waiting(db)]
+
+
+@app.post("/api/price-alerts", response_model=PriceAlertOut)
+def create_price_alert(req: PriceAlertIn, db: Session = Depends(get_db)):
+    try:
+        return _price_alert_out(price_alerts.create(db, req.symbol.upper(), req.price))
+    except price_alerts.NoPrice:
+        raise HTTPException(status_code=404, detail=f"No price for {req.symbol}")
+
+
+@app.delete("/api/price-alerts/{alert_id}")
+def delete_price_alert(alert_id: int, db: Session = Depends(get_db)):
+    if not price_alerts.delete(db, alert_id):
+        raise HTTPException(status_code=404, detail="No such price alert")
+    return {"ok": True}
+
+
+# The user's own trades (my_trades.py), for the chart panel's Trades box.
+@app.get("/api/my-trades", response_model=list[MyTradeOut])
+def list_my_trades():
+    return [MyTradeOut(**t) for t in my_trades.load()]
+
+
+@app.get("/api/model-challenge", response_model=list[ModelChallengeOut])
+def list_model_challenge():
+    return model_challenge.results()
 
 
 @app.post("/api/scans/run", response_model=ScanOut)

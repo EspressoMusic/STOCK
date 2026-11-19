@@ -3,6 +3,7 @@ import usePortfolio from "../hooks/usePortfolio";
 import usePortfolioDisplay from "../hooks/usePortfolioDisplay";
 import useTechScanSettings from "../hooks/useTechScanSettings";
 import useBilling from "../hooks/useBilling";
+import usePush from "../hooks/usePush";
 import { useLang } from "../context/LangContext";
 import LegalModal from "../components/LegalModal";
 import AccessibilityModal from "../components/AccessibilityModal";
@@ -26,6 +27,17 @@ export default function SettingsScreen({ theme, onToggleTheme, skin, onToggleSki
       renderGoogleButton(buttonRef.current, { theme: "outline", size: "large", shape: "pill", width: 260 });
     }
   }, [googleReady, isGuest, renderGoogleButton]);
+
+  const push = usePush();
+  const pushLabel = {
+    unsupported: t("settings.remindersUnsupported"),
+    "needs-https": t("settings.pushNeedsHttps"),
+    "needs-install": t("settings.pushNeedsInstall"),
+    blocked: t("settings.remindersBlocked"),
+    busy: t("settings.pushBusy"),
+    on: t("settings.on"),
+    off: t("settings.off"),
+  }[push.state];
 
   const remindersLabel = () => {
     if (!reminders.supported) return t("settings.remindersUnsupported");
@@ -127,6 +139,19 @@ export default function SettingsScreen({ theme, onToggleTheme, skin, onToggleSki
 
         <button type="button" className="settings-row settings-row-btn" onClick={() => setA11yModalOpen(true)}>
           <div className="settings-row-label">{t("settings.accessibility")}</div>
+        </button>
+
+        <button
+          type="button"
+          className="settings-row settings-row-btn"
+          onClick={push.toggle}
+          disabled={push.state !== "on" && push.state !== "off"}
+        >
+          <div>
+            <div className="settings-row-label">{t("settings.push")}</div>
+            <div className="settings-row-sub">{push.error || t("settings.pushSub")}</div>
+          </div>
+          <span className="settings-row-value">{pushLabel}</span>
         </button>
 
         <button

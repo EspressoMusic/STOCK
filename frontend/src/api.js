@@ -1,7 +1,13 @@
 // Over https (the phone, through Tailscale) a local http backend is on the same address:
 // Vite passes /api on to it (vite.config.js), as the page can't call http from https.
 const ENV_API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
-const API_BASE = window.location.protocol === "https:" && ENV_API_BASE.startsWith("http:") ? "" : ENV_API_BASE;
+let API_BASE = window.location.protocol === "https:" && ENV_API_BASE.startsWith("http:") ? "" : ENV_API_BASE;
+
+// The chart panel on the live site talks to that site's own functions (frontend/api), not
+// to VITE_API_BASE's server: "" = the same address (tv/main.jsx).
+export function setApiBase(base) {
+  API_BASE = base;
+}
 
 async function request(path, options) {
   const res = await fetch(`${API_BASE}${path}`, {

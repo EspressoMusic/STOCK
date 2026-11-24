@@ -66,25 +66,34 @@ class PaneFill {
 }
 
 // The live price (24/11/26): TradingView's dotted line across the chart at the last price,
-// with the price in a box at the right edge — on the chart itself, since the price scale is
-// hidden (15/11/26). Colored as the last candle, and moved every few seconds (LIVE_EVERY_MS).
+// colored as the last candle and moved every few seconds (LIVE_EVERY_MS); on the price scale,
+// the price in an outlined box with the time left until the candle closes under it, like the
+// user's TradingView (screenshot 24/11/26).
 class LivePriceLine {
   _series = null;
-  _state = null; // { price, color, precision }
+  _state = null; // { price, color, precision, closeAt (unix seconds | null), text, axisBg }
+  _timer = null;
 
   constructor() {
-    const renderer = {
-      draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this._draw(context, mediaSize.width)),
+    const pane = {
+      draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this._drawLine(context, mediaSize.width)),
     };
-    this._paneViews = [{ zOrder: () => "top", renderer: () => renderer }];
+    const axis = {
+      draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this._drawLabel(context, mediaSize.width)),
+    };
+    this._paneViews = [{ zOrder: () => "top", renderer: () => pane }];
+    this._axisViews = [{ zOrder: () => "top", renderer: () => axis }];
   }
 
   attached({ series, requestUpdate }) {
     this._series = series;
     this._requestUpdate = requestUpdate;
+    // The clock ticks every second.
+    this._timer = setInterval(() => this._state?.closeAt && this._requestUpdate?.(), 1000);
   }
 
   detached() {
+    clearInterval(this._timer);
     this._series = null;
     this._requestUpdate = null;
   }
@@ -93,41 +102,137 @@ class LivePriceLine {
     return this._paneViews;
   }
 
+  priceAxisPaneViews() {
+    return this._axisViews;
+  }
+
   set(state) {
     this._state = state;
     this._requestUpdate?.();
   }
 
-  _draw(ctx, width) {
-    if (!this._series || !this._state) return;
-    const { price, color, precision } = this._state;
-    const y = this._series.priceToCoordinate(price);
+  _y() {
+    if (!this._series || !this._state) return null;
+    return this._series.priceToCoordinate(this._state.price);
+  }
+
+  _drawLine(ctx, width) {
+    const y = this._y();
     if (y == null) return;
-    const text = price.toFixed(precision);
-    ctx.save();
-    ctx.font = `700 12px ${FONT}`;
-    const boxWidth = Math.ceil(ctx.measureText(text).width) + 12;
-    const boxHeight = 20;
-    const x = width - boxWidth;
     const lineY = Math.round(y) + 0.5;
-    ctx.strokeStyle = color;
+    ctx.save();
+    ctx.strokeStyle = this._state.color;
     ctx.lineWidth = 1;
     ctx.setLineDash([2, 2]);
     ctx.beginPath();
     ctx.moveTo(0, lineY);
-    ctx.lineTo(x, lineY);
+    ctx.lineTo(width, lineY);
     ctx.stroke();
-    const top = Math.round(y - boxHeight / 2);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, top, boxWidth, boxHeight, [3, 0, 0, 3]);
-    else ctx.rect(x, top, boxWidth, boxHeight);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, x + 6, top + boxHeight / 2 + 0.5);
     ctx.restore();
   }
+
+  _drawLabel(ctx, width) {
+    const y = this._y();
+    if (y == null) return;
+    const { price, precision, closeAt, text, axisBg } = this._state;
+    const left = closeAt != null ? closeAt - Date.now() / 1000 : 0;
+    const clock = left > 0 ? countdown(left) : null;
+    const top = Math.round(y) - 10;
+    const height = clock ? 36 : 20;
+    ctx.save();
+    ctx.fillStyle = axisBg;
+    ctx.fillRect(1, top, width - 2, height);
+    ctx.strokeStyle = text;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(1.5, top + 0.5, width - 3, height - 1);
+    ctx.fillStyle = text;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `700 12px ${FONT}`;
+    ctx.fillText(price.toFixed(precision), width / 2, top + 10.5);
+    if (clock) {
+      ctx.font = `600 11px ${FONT}`;
+      ctx.fillText(clock, width / 2, top + 27);
+    }
+    ctx.restore();
+  }
+}
+
+// "45:09", "03:12:45", "2d 7h": the time left until a candle closes.
+function countdown(seconds) {
+  const two = (n) => String(n).padStart(2, "0");
+  const days = Math.floor(seconds / DAY);
+  const hours = Math.floor((seconds % DAY) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  return hours > 0 ? `${two(hours)}:${two(minutes)}:${two(secs)}` : `${two(minutes)}:${two(secs)}`;
+}
+
+const DAY = 86400;
+const INTRADAY_STEP = { "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400 };
+// The hour, New York time, a market's trading day ends; none for crypto (UTC days, 24/7).
+const DAY_END_NY = { stock: 16, forex: 17, futures: 17, crypto: null };
+
+function marketOf(symbol) {
+  if (/=X$/.test(symbol)) return "forex";
+  if (/=F$/.test(symbol)) return "futures";
+  if (/-(USD|USDT|EUR|BTC|ETH)$/.test(symbol)) return "crypto";
+  return "stock";
+}
+
+const NY_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+});
+
+// A unix time as New York's clock shows it, read as if it were UTC.
+function nyClock(time) {
+  const p = Object.fromEntries(NY_PARTS.formatToParts(new Date(time * 1000)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) / 1000;
+}
+
+// The unix time of `hour`:00 New York time on a date (given as that date's UTC midnight).
+function nyHour(day, hour) {
+  const guess = day + hour * 3600;
+  return guess + (guess - nyClock(guess));
+}
+
+// When the candle starting at `time` closes, or null when unknown. Daily and longer candles
+// start at midnight of their date (in New York or UTC), so their date is that of time + 12h.
+// Holidays aren't known: a closed market just shows no clock, since its time has passed.
+function candleCloseAt(symbol, timeframe, time) {
+  const market = marketOf(symbol);
+  const endHour = DAY_END_NY[market];
+  const dayEnd = (day) => (endHour == null ? day + DAY : nyHour(day, endHour));
+  const step = INTRADAY_STEP[timeframe];
+  if (step) {
+    const start = time - (time % 60); // Yahoo stamps a candle's live point to the second
+    const close = start + step;
+    if (endHour == null) return close;
+    const nyDay = Math.floor(nyClock(start) / DAY) * DAY;
+    const end = dayEnd(nyDay);
+    // Stocks stop at the close every day, forex and futures on Fridays.
+    const friday = new Date(nyDay * 1000).getUTCDay() === 5;
+    return market === "stock" || (friday && start < end) ? Math.min(close, end) : close;
+  }
+  const day = Math.floor((time + 12 * 3600) / DAY) * DAY;
+  if (timeframe === "1d") return dayEnd(day);
+  if (timeframe === "1w") return endHour == null ? day + 7 * DAY : dayEnd(day + 4 * DAY);
+  if (timeframe === "1mo") {
+    const d = new Date(day * 1000);
+    const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 1000;
+    if (endHour == null) return next;
+    let last = next - DAY;
+    while ([0, 6].includes(new Date(last * 1000).getUTCDay())) last -= DAY;
+    return dayEnd(last);
+  }
+  return null;
 }
 
 const ALERT_COLOR = "#d35400";
@@ -1473,8 +1578,10 @@ export default function TvApp() {
       if (!chart.priceScale("right").options().autoScale) return;
       const paneHeight = chart.paneSize().height;
       const range = chart.priceScale("right").getVisibleRange();
-      // Not on the time scale under the candles, which squeezes and stretches the time.
-      if (!range || e.clientY - el.getBoundingClientRect().top > paneHeight) return;
+      // Not on the time scale under the candles, which squeezes and stretches the time, nor on
+      // the price scale, which squeezes and stretches the prices (the library does both).
+      const box = el.getBoundingClientRect();
+      if (!range || e.clientY - box.top > paneHeight || e.clientX - box.left > chart.paneSize().width) return;
       drag = { y: e.clientY, range, paneHeight, moved: false };
     };
     const onMove = (e) => {
@@ -1512,8 +1619,9 @@ export default function TvApp() {
       // No grid and no line along the price and time scales — a bare chart (13/11/26).
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
       crosshair: { vertLine: line, horzLine: line },
-      // No price scale on the right either — the user asked to hide it (15/11/26).
-      rightPriceScale: { visible: false, borderVisible: false },
+      // The price scale on the right, hidden on 15/11/26, is back since 24/11/26 for the live
+      // price and its clock (LivePriceLine); dragging it up or down squeezes the chart.
+      rightPriceScale: { visible: true, borderVisible: false },
       timeScale: { borderVisible: false },
     });
     paneFillRef.current?.setColor(c.bg);
@@ -1535,6 +1643,7 @@ export default function TvApp() {
   useEffect(() => {
     if (!symbol) return;
     let stale = false;
+    let closeTimer = null;
     const load = (first) => {
       if (first) setLoadState("loading");
       getCandles(symbol, timeframe)
@@ -1544,6 +1653,11 @@ export default function TvApp() {
           const list = data.candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close }));
           setCandles({ symbol, timeframe, list });
           setLoadState(null);
+          // Again just after the last candle closes (if within the minute), for the next one
+          // and its clock.
+          clearTimeout(closeTimer);
+          const left = candleCloseAt(symbol, timeframe, list[list.length - 1].time) * 1000 - Date.now();
+          if (left > 0 && left < CANDLES_EVERY_MS) closeTimer = setTimeout(() => load(false), left + 3000);
         })
         .catch((err) => {
           if (stale || !first) return;
@@ -1555,6 +1669,7 @@ export default function TvApp() {
     return () => {
       stale = true;
       clearInterval(id);
+      clearTimeout(closeTimer);
     };
   }, [symbol, timeframe]);
 
@@ -1672,6 +1787,9 @@ export default function TvApp() {
       price: bar.close,
       color: bar.close >= bar.open ? c.up : c.down,
       precision: precisionFor(candles.symbol, list[list.length - 1].close),
+      closeAt: candleCloseAt(candles.symbol, candles.timeframe, bar.time),
+      text: c.text,
+      axisBg: c.axisBg,
     });
   }, [candles, live, theme, emaLine, showEma]);
 

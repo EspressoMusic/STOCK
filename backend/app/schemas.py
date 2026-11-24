@@ -261,6 +261,11 @@ class QuoteOut(BaseModel):
     market_cap: Optional[int] = None
 
 
+class LivePriceOut(BaseModel):
+    symbol: str
+    price: float
+
+
 class StockProfileOut(BaseModel):
     """On-demand version of a scan result's detail fields, for stocks that reach the
     detail modal from a list that doesn't carry the AI explanation (e.g. triple-touch)."""

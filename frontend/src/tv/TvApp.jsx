@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createChart, LineSeries } from "lightweight-charts";
 import {
   createPriceAlert, deletePriceAlert, getCandles, getLatestScan, getLatestStochExtremeScan, getLatestTripleTouchScan,
-  getLatestZoneTouchScan, getMyTrades, getPriceAlerts, getQuote, getSignals, runScan, runStochExtremeScan, runTripleTouchScan,
-  runZoneTouchScan, searchSymbols,
+  getLatestZoneTouchScan, getLivePrice, getMyTrades, getPriceAlerts, getQuote, getSignals, runScan, runStochExtremeScan, runTripleTouchScan,
+  runZoneTouchScan, searchSymbols, signalPictureUrl,
 } from "../api";
 import { computeEma } from "../lib/ema";
 import { BREAK_LOOKBACK, findReturnLevels, MAX_RETURN_BARS, MIN_RUN } from "../lib/returnLevels";
@@ -62,6 +62,71 @@ class PaneFill {
   setColor(color) {
     this.color = color;
     this._requestUpdate?.();
+  }
+}
+
+// The live price (24/11/26): TradingView's dotted line across the chart at the last price,
+// with the price in a box at the right edge — on the chart itself, since the price scale is
+// hidden (15/11/26). Colored as the last candle, and moved every few seconds (LIVE_EVERY_MS).
+class LivePriceLine {
+  _series = null;
+  _state = null; // { price, color, precision }
+
+  constructor() {
+    const renderer = {
+      draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this._draw(context, mediaSize.width)),
+    };
+    this._paneViews = [{ zOrder: () => "top", renderer: () => renderer }];
+  }
+
+  attached({ series, requestUpdate }) {
+    this._series = series;
+    this._requestUpdate = requestUpdate;
+  }
+
+  detached() {
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  paneViews() {
+    return this._paneViews;
+  }
+
+  set(state) {
+    this._state = state;
+    this._requestUpdate?.();
+  }
+
+  _draw(ctx, width) {
+    if (!this._series || !this._state) return;
+    const { price, color, precision } = this._state;
+    const y = this._series.priceToCoordinate(price);
+    if (y == null) return;
+    const text = price.toFixed(precision);
+    ctx.save();
+    ctx.font = `700 12px ${FONT}`;
+    const boxWidth = Math.ceil(ctx.measureText(text).width) + 12;
+    const boxHeight = 20;
+    const x = width - boxWidth;
+    const lineY = Math.round(y) + 0.5;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(0, lineY);
+    ctx.lineTo(x, lineY);
+    ctx.stroke();
+    const top = Math.round(y - boxHeight / 2);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, top, boxWidth, boxHeight, [3, 0, 0, 3]);
+    else ctx.rect(x, top, boxWidth, boxHeight);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + 6, top + boxHeight / 2 + 0.5);
+    ctx.restore();
   }
 }
 
@@ -214,6 +279,7 @@ const SIGNAL_KINDS = [
 ];
 const QUOTES_EVERY_MS = 60_000;
 const CANDLES_EVERY_MS = 60_000;
+const LIVE_EVERY_MS = 3_000; // the live price on the chart (LivePriceLine)
 const TRADE_LEAD_BARS = 30; // candles shown before a trade's zone began
 
 // The movers scans store naive UTC datetimes, so they serialize without a zone suffix.
@@ -425,6 +491,14 @@ const ICONS = {
       <path d="M9 19.5a2 2 0 0 0 4 0" />
     </svg>
   ),
+  gallery: (
+    <svg viewBox="0 0 22 22" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1" />
+      <rect x="12" y="3.5" width="6.5" height="6.5" rx="1" />
+      <rect x="3.5" y="12" width="6.5" height="6.5" rx="1" />
+      <rect x="12" y="12" width="6.5" height="6.5" rx="1" />
+    </svg>
+  ),
   trades: (
     <svg viewBox="0 0 22 22" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="9" width="16" height="6" rx="1" fill="currentColor" fillOpacity="0.25" />
@@ -534,8 +608,8 @@ function SymbolSearch({ initial, title, onPick, onClose }) {
   );
 }
 
-// A top bar box: a click outside it or Escape closes it. Clicks in the symbol search
-// (opened from the watchlist's +) leave it open.
+// A top bar box: a click outside it or Escape closes it. Clicks in the symbol search leave
+// it open.
 function useMenuBox() {
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
@@ -609,8 +683,9 @@ function IndicatorsMenu({ items }) {
 
   return (
     <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Indicators">
+      <button type="button" className={`tv-btn tv-btn-text${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Indicators">
         {ICONS.indicators}
+        Indicators
       </button>
       {open && (
         <div className="tv-ind-menu" role="menu">
@@ -635,67 +710,96 @@ function IndicatorsMenu({ items }) {
   );
 }
 
-// The watchlist button in the top bar, next to Indicators; its box stays open while a
-// click on a row switches the chart.
-function WatchlistMenu({ watchlist, quotes, symbol, onPick, onAdd, onRemove }) {
-  const [open, setOpen, boxRef] = useMenuBox();
+// The right side as on TradingView (the user's ask, 23/11/26): an icon rail on the window's
+// edge and a panel docked beside it, the chart narrowing next to it. A click on an icon opens
+// its panel, a second click closes it; the panel stays open while the chart is used.
+const SIDE_PANELS = [
+  { key: "watchlist", title: "Watchlist", icon: "list" },
+  { key: "scanner", title: "Stock scanner", icon: "scanner" },
+  { key: "signals", title: "Signals", icon: "bell" },
+  { key: "trades", title: "My trades", icon: "trades" },
+  { key: "alerts", title: "Price alerts", icon: "alarm" },
+];
 
+// Under the panels' icons, the signals page's own button (23/11/26); a panel icon clicked
+// while the page is open goes back to the chart with that panel.
+function SideRail({ side, onSide, alertCount, page, onPage }) {
   return (
-    <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Watchlist">
-        {ICONS.list}
+    <nav className="tv-rail">
+      {SIDE_PANELS.map((p) => (
+        <button
+          key={p.key}
+          type="button"
+          className={`tv-rail-btn${!page && side === p.key ? " active" : ""}`}
+          onClick={() => {
+            onPage(false);
+            onSide(!page && side === p.key ? null : p.key);
+          }}
+          title={p.title}
+        >
+          {ICONS[p.icon]}
+          {p.key === "alerts" && alertCount > 0 && <span className="tv-rail-badge">{alertCount}</span>}
+        </button>
+      ))}
+      <span className="tv-rail-sep" />
+      <button type="button" className={`tv-rail-btn${page ? " active" : ""}`} onClick={() => onPage(!page)} title="All signals page">
+        {ICONS.gallery}
       </button>
-      {open && (
-        <div className="tv-watch">
-          {/* No title or column names, only the rows (14/11/26). */}
-          <div className="tv-watch-head">
-            <button type="button" className="tv-icon-btn" onClick={onAdd} title="Add symbol">
-              {ICONS.plus}
-            </button>
-          </div>
-          <div className="tv-watch-rows">
-            {watchlist.map((s) => {
-              const q = quotes[s];
-              const pct = q?.change_percent;
-              const digits = q?.price != null ? precisionFor(s, q.price) : 2;
-              const tone = pct == null ? "" : pct >= 0 ? " up" : " down";
-              return (
-                <div
-                  key={s}
-                  role="button"
-                  tabIndex={-1}
-                  className={`tv-watch-row${s === symbol ? " active" : ""}`}
-                  onClick={() => onPick(s)}
-                  title={q?.name || s}
-                >
-                  <b>{shownSymbol(s)}</b>
-                  <span>{q?.price != null ? q.price.toFixed(digits) : "—"}</span>
-                  <span className={tone}>{pct != null ? `${signed(pct, 2)}%` : ""}</span>
-                  <button
-                    type="button"
-                    className="tv-watch-remove"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(s);
-                    }}
-                    title="Remove from watchlist"
-                  >
-                    {ICONS.close}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
+    </nav>
+  );
+}
+
+// The watchlist panel; a click on a row switches the chart.
+function WatchlistPanel({ open, watchlist, quotes, symbol, onPick, onAdd, onRemove }) {
+  if (!open) return null;
+  return (
+    <aside className="tv-side">
+      {/* No title or column names, only the + and the rows (14/11/26). */}
+      <div className="tv-watch-head">
+        <button type="button" className="tv-icon-btn" onClick={onAdd} title="Add symbol">
+          {ICONS.plus}
+        </button>
+      </div>
+      <div className="tv-watch-rows">
+        {watchlist.map((s) => {
+          const q = quotes[s];
+          const pct = q?.change_percent;
+          const digits = q?.price != null ? precisionFor(s, q.price) : 2;
+          const tone = pct == null ? "" : pct >= 0 ? " up" : " down";
+          return (
+            <div
+              key={s}
+              role="button"
+              tabIndex={-1}
+              className={`tv-watch-row${s === symbol ? " active" : ""}`}
+              onClick={() => onPick(s)}
+              title={q?.name || s}
+            >
+              <b>{shownSymbol(s)}</b>
+              <span>{q?.price != null ? q.price.toFixed(digits) : "—"}</span>
+              <span className={tone}>{pct != null ? `${signed(pct, 2)}%` : ""}</span>
+              <button
+                type="button"
+                className="tv-watch-remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(s);
+                }}
+                title="Remove from watchlist"
+              >
+                {ICONS.close}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
 // The bots' alerts that went out (the app's signals page, minus its history examples), by
 // strategy, newest first; a click on one opens its chart (the user's ask, 13/11/26).
-function SignalsMenu({ symbol, onPick }) {
-  const [open, setOpen, boxRef] = useMenuBox();
+function SignalsPanel({ open, symbol, onPick }) {
   const [kind, setKind] = useState("weekly");
   const [lists, setLists] = useState({}); // kind → signals, or "error"
 
@@ -713,57 +817,271 @@ function SignalsMenu({ symbol, onPick }) {
     };
   }, [open]);
 
+  if (!open) return null;
   const list = lists[kind];
 
   return (
-    <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Signals">
-        {ICONS.bell}
-      </button>
-      {open && (
-        <div className="tv-watch">
-          <div className="tv-watch-head">
-            <span>Signals</span>
-          </div>
-          <div className="tv-sig-tabs">
-            {SIGNAL_KINDS.map((k) => (
-              <button key={k.value} type="button" className={`tv-btn${kind === k.value ? " active" : ""}`} onClick={() => setKind(k.value)}>
-                {k.label}
-                {Array.isArray(lists[k.value]) && <span className="tv-sig-count">{lists[k.value].length}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="tv-watch-rows">
-            {list === undefined && <p className="tv-modal-empty">Loading…</p>}
-            {list === "error" && <p className="tv-modal-empty tv-error">Server unavailable</p>}
-            {Array.isArray(list) && !list.length && <p className="tv-modal-empty">No signals yet</p>}
-            {Array.isArray(list) &&
-              list.map((s) => (
-                <div
-                  key={s.id}
-                  role="button"
-                  tabIndex={-1}
-                  className={`tv-watch-row tv-sig-row${s.symbol === symbol ? " active" : ""}`}
-                  onClick={() => onPick(s.symbol)}
-                  title={s.name || s.symbol}
-                >
-                  <b>{shownSymbol(s.symbol)}</b>
-                  <span className={s.direction || ""}>{s.direction === "up" ? "▲ Up" : s.direction === "down" ? "▼ Down" : ""}</span>
-                  <span>{signalTime(s.created_at)}</span>
-                </div>
-              ))}
-          </div>
+    <aside className="tv-side">
+      <div className="tv-watch-head">
+        <span>Signals</span>
+      </div>
+      <div className="tv-sig-tabs">
+        {SIGNAL_KINDS.map((k) => (
+          <button key={k.value} type="button" className={`tv-btn${kind === k.value ? " active" : ""}`} onClick={() => setKind(k.value)}>
+            {k.label}
+            {Array.isArray(lists[k.value]) && <span className="tv-sig-count">{lists[k.value].length}</span>}
+          </button>
+        ))}
+      </div>
+      <div className="tv-watch-rows">
+        {list === undefined && <p className="tv-modal-empty">Loading…</p>}
+        {list === "error" && <p className="tv-modal-empty tv-error">Server unavailable</p>}
+        {Array.isArray(list) && !list.length && <p className="tv-modal-empty">No signals yet</p>}
+        {Array.isArray(list) &&
+          list.map((s) => (
+            <div
+              key={s.id}
+              role="button"
+              tabIndex={-1}
+              className={`tv-watch-row tv-sig-row${s.symbol === symbol ? " active" : ""}`}
+              onClick={() => onPick(s.symbol)}
+              title={s.name || s.symbol}
+            >
+              <b>{shownSymbol(s.symbol)}</b>
+              <span className={s.direction || ""}>{s.direction === "up" ? "▲ Up" : s.direction === "down" ? "▼ Down" : ""}</span>
+              <span>{signalTime(s.created_at)}</span>
+            </div>
+          ))}
+      </div>
+    </aside>
+  );
+}
+
+// The signals page (the user's ask, 23/11/26: "a special page in the panel to see all the
+// signals"): every alert the bots sent, all strategies or one, as cards with the chart picture
+// it went out with, covering the chart. This week by day on top, past weeks below, a row each,
+// opened with a click (so their pictures load only then). A click on a picture opens it full
+// size, a click on the symbol opens its chart in the panel.
+const PAGE_KINDS = [{ value: "all", label: "All" }, ...SIGNAL_KINDS];
+const KIND_LABELS = Object.fromEntries(SIGNAL_KINDS.map((k) => [k.value, k.label]));
+const PAGE_REFRESH_MS = 60_000;
+
+// The Sunday the date's week starts on, at midnight local time (as on the app's page).
+function weekStart(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+// [key, label, items] in the list's order, from keyOf/labelOf of each group's first item.
+function groupBy(list, keyOf, labelOf) {
+  const groups = [];
+  for (const item of list) {
+    const key = keyOf(item);
+    if (groups.at(-1)?.[0] !== key) groups.push([key, labelOf(item), []]);
+    groups.at(-1)[2].push(item);
+  }
+  return groups;
+}
+
+function dayTitle(iso) {
+  return new Date(iso).toLocaleDateString(LOCALE, { weekday: "long", day: "numeric", month: "long" });
+}
+
+function shortDay(date) {
+  return date.toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
+}
+
+function clockTime(iso) {
+  return new Date(iso).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+}
+
+function SignalCard({ signal, showKind, onPick, onPicture }) {
+  return (
+    <article className="tv-card">
+      <div className="tv-card-head">
+        <button
+          type="button"
+          className="tv-card-symbol"
+          onClick={() => onPick(signal.symbol)}
+          title={`Open ${signal.name || signal.symbol} on the chart`}
+        >
+          {shownSymbol(signal.symbol)}
+        </button>
+        {signal.direction && (
+          <span className={`tv-card-dir ${signal.direction}`}>{signal.direction === "up" ? "▲ Up" : "▼ Down"}</span>
+        )}
+        {showKind && <span className="tv-card-tag">{KIND_LABELS[signal.kind] || signal.kind}</span>}
+        {signal.strong && <span className="tv-card-tag">Strong</span>}
+        <span className="tv-card-time">{clockTime(signal.created_at)}</span>
+      </div>
+      {signal.has_picture ? (
+        <button type="button" className="tv-card-pic" onClick={() => onPicture(signal)} title="Full size">
+          <img src={signalPictureUrl(signal.id)} alt={signal.symbol} loading="lazy" />
+        </button>
+      ) : (
+        <p className="tv-card-none">No picture</p>
+      )}
+      {signal.details && (
+        <p className="tv-card-details" dir="auto">
+          {signal.details}
+        </p>
+      )}
+    </article>
+  );
+}
+
+function SignalDays({ signals, showKind, onPick, onPicture }) {
+  return groupBy(
+    signals,
+    (s) => new Date(s.created_at).toDateString(),
+    (s) => dayTitle(s.created_at)
+  ).map(([key, title, list]) => (
+    <section key={key} className="tv-page-day">
+      <h3>
+        {title} <span>· {list.length}</span>
+      </h3>
+      <div className="tv-cards">
+        {list.map((s) => (
+          <SignalCard key={s.id} signal={s} showKind={showKind} onPick={onPick} onPicture={onPicture} />
+        ))}
+      </div>
+    </section>
+  ));
+}
+
+function SignalsPage({ open, onPick, onClose }) {
+  const [kind, setKind] = useState("all");
+  const [lists, setLists] = useState({}); // kind → signals, or "error"
+  const [openWeeks, setOpenWeeks] = useState(() => new Set());
+  const [picture, setPicture] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let stale = false;
+    const load = () =>
+      SIGNAL_KINDS.forEach(({ value }) =>
+        getSignals(value)
+          .then((all) => !stale && setLists((l) => ({ ...l, [value]: all.filter((s) => !s.example) })))
+          // A failed refresh keeps the list already shown.
+          .catch(() => !stale && setLists((l) => (Array.isArray(l[value]) ? l : { ...l, [value]: "error" })))
+      );
+    load();
+    const id = setInterval(() => document.visibilityState === "visible" && load(), PAGE_REFRESH_MS);
+    return () => {
+      stale = true;
+      clearInterval(id);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      if (picture) setPicture(null);
+      else onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, picture, onClose]);
+
+  if (!open) return null;
+
+  const loaded = SIGNAL_KINDS.map(({ value }) => lists[value]);
+  let list; // undefined loading | "error" | signals, newest first
+  if (kind !== "all") list = lists[kind];
+  else if (loaded.some((l) => l === undefined)) list = undefined;
+  else if (loaded.every((l) => l === "error")) list = "error";
+  else list = loaded.filter(Array.isArray).flat().sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const countOf = (value) => {
+    if (value === "all") return loaded.some(Array.isArray) ? loaded.filter(Array.isArray).reduce((n, l) => n + l.length, 0) : null;
+    return Array.isArray(lists[value]) ? lists[value].length : null;
+  };
+
+  const thisWeek = weekStart(new Date()).getTime();
+  const weeks = Array.isArray(list)
+    ? groupBy(
+        list,
+        (s) => weekStart(new Date(s.created_at)).getTime(),
+        (s) => weekStart(new Date(s.created_at))
+      )
+    : [];
+  const current = weeks.find(([key]) => key === thisWeek)?.[2] ?? [];
+  const past = weeks.filter(([key]) => key < thisWeek);
+  const showKind = kind === "all";
+  const toggleWeek = (key) =>
+    setOpenWeeks((set) => {
+      const next = new Set(set);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  return (
+    <section className="tv-page">
+      <header className="tv-page-head">
+        <h2>Signals</h2>
+        <div className="tv-page-tabs">
+          {PAGE_KINDS.map((k) => (
+            <button key={k.value} type="button" className={`tv-btn${kind === k.value ? " active" : ""}`} onClick={() => setKind(k.value)}>
+              {k.label}
+              {countOf(k.value) != null && <span className="tv-sig-count">{countOf(k.value)}</span>}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="tv-icon-btn tv-page-close" onClick={onClose} title="Back to the chart">
+          {ICONS.close}
+        </button>
+      </header>
+
+      <div className="tv-page-body">
+        {list === undefined && <p className="tv-modal-empty">Loading…</p>}
+        {list === "error" && <p className="tv-modal-empty tv-error">Server unavailable</p>}
+        {Array.isArray(list) && !list.length && <p className="tv-modal-empty">No signals yet</p>}
+        {Array.isArray(list) && list.length > 0 && (
+          <>
+            <h2 className="tv-page-section">This week</h2>
+            {current.length ? (
+              <SignalDays signals={current} showKind={showKind} onPick={onPick} onPicture={setPicture} />
+            ) : (
+              <p className="tv-modal-empty">No signals this week yet</p>
+            )}
+            {past.length > 0 && <h2 className="tv-page-section">History</h2>}
+            {past.map(([key, start, signals]) => {
+              const end = new Date(start);
+              end.setDate(end.getDate() + 6); // by the calendar: a clock change makes one day 23 or 25 hours
+              const isOpen = openWeeks.has(key);
+              return (
+                <section key={key} className="tv-page-week">
+                  <button type="button" className={`tv-page-week-head${isOpen ? " open" : ""}`} onClick={() => toggleWeek(key)}>
+                    <span>
+                      Week {shortDay(start)} – {shortDay(end)}
+                    </span>
+                    <span className="tv-sig-count">
+                      {signals.length} signals {isOpen ? "▴" : "▾"}
+                    </span>
+                  </button>
+                  {isOpen && <SignalDays signals={signals} showKind={showKind} onPick={onPick} onPicture={setPicture} />}
+                </section>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {picture && (
+        <div className="tv-modal-shade tv-picture" onClick={() => setPicture(null)}>
+          <img src={signalPictureUrl(picture.id)} alt={picture.symbol} />
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
 // The user's own trades (the user's ask, 19/11/26: their zones as a real chart they can zoom
 // into, not a picture): a click opens the trade's chart with its zone; the timeframe buttons
 // switch between daily, 4h, 1h and 15m.
-function TradesMenu({ tradeId, onPick }) {
-  const [open, setOpen, boxRef] = useMenuBox();
+function TradesPanel({ open, tradeId, onPick }) {
   const [trades, setTrades] = useState(null); // null loading | list | "error"
 
   useEffect(() => {
@@ -778,47 +1096,41 @@ function TradesMenu({ tradeId, onPick }) {
     };
   }, [open]);
 
+  if (!open) return null;
+
   return (
-    <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="My trades">
-        {ICONS.trades}
-      </button>
-      {open && (
-        <div className="tv-watch tv-trades">
-          <div className="tv-watch-head">
-            <span>My trades</span>
-          </div>
-          <div className="tv-watch-rows">
-            {trades === null && <p className="tv-modal-empty">Loading…</p>}
-            {trades === "error" && <p className="tv-modal-empty tv-error">Server unavailable</p>}
-            {Array.isArray(trades) && !trades.length && <p className="tv-modal-empty">No trades yet</p>}
-            {Array.isArray(trades) &&
-              trades.map((t) => (
-                <div
-                  key={t.id}
-                  role="button"
-                  tabIndex={-1}
-                  className={`tv-watch-row tv-trade-row${t.id === tradeId ? " active" : ""}`}
-                  onClick={() => onPick(t)}
-                  title={`Zone from ${signalTime(t.start)}`}
-                >
-                  <b>{t.name}</b>
-                  <span>{tradeZoneText(t)}</span>
-                  <span>{signalTime(t.start)}</span>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <aside className="tv-side">
+      <div className="tv-watch-head">
+        <span>My trades</span>
+      </div>
+      <div className="tv-watch-rows">
+        {trades === null && <p className="tv-modal-empty">Loading…</p>}
+        {trades === "error" && <p className="tv-modal-empty tv-error">Server unavailable</p>}
+        {Array.isArray(trades) && !trades.length && <p className="tv-modal-empty">No trades yet</p>}
+        {Array.isArray(trades) &&
+          trades.map((t) => (
+            <div
+              key={t.id}
+              role="button"
+              tabIndex={-1}
+              className={`tv-watch-row tv-trade-row${t.id === tradeId ? " active" : ""}`}
+              onClick={() => onPick(t)}
+              title={`Zone from ${signalTime(t.start)}`}
+            >
+              <b>{t.name}</b>
+              <span>{tradeZoneText(t)}</span>
+              <span>{signalTime(t.start)}</span>
+            </div>
+          ))}
+      </div>
+    </aside>
   );
 }
 
 // The stock scanner (the user's ask, 14/11/26): a tab per scan, its last result when first
 // opened, Scan to run it again; a click on a row opens its chart. Each scan's result stays
-// while the box is closed, so a slow one that finishes meanwhile is there on the way back.
-function ScannerMenu({ symbol, onPick }) {
-  const [open, setOpen, boxRef] = useMenuBox();
+// while the panel is closed, so a slow one that finishes meanwhile is there on the way back.
+function ScannerPanel({ open, symbol, onPick }) {
   const [scanId, setScanId] = useState(SCANS[0].id);
   const [scans, setScans] = useState({}); // id → { view, loading, scanning, error }
   const startedRef = useRef(new Set());
@@ -851,63 +1163,58 @@ function ScannerMenu({ symbol, onPick }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.id, open]);
 
+  if (!open) return null;
+
   return (
-    <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Stock scanner">
-        {ICONS.scanner}
-      </button>
-      {open && (
-        <div className="tv-watch tv-scan">
-          <div className="tv-watch-head">
-            <span>Scanner</span>
-            <button type="button" className="tv-alert-create" onClick={() => scan(current)} disabled={state.scanning}>
-              {state.scanning ? "Scanning…" : "Scan"}
-            </button>
-          </div>
-          <div className="tv-sig-tabs tv-scan-tabs">
-            {SCANS.map((s) => (
-              <button key={s.id} type="button" className={`tv-btn${s.id === current.id ? " active" : ""}`} onClick={() => setScanId(s.id)}>
-                {s.label}
-              </button>
-            ))}
-          </div>
-          {state.view?.scannedAt && (
-            <p className="tv-scan-note">
-              Last scan {signalTime(state.view.scannedAt)} · {rows.length} symbols
-            </p>
-          )}
-          <div className="tv-watch-rows">
-            {state.loading && <p className="tv-modal-empty">Loading…</p>}
-            {!state.loading && state.scanning && !state.view && (
-              <p className="tv-modal-empty">Scanning… the first scan can take a minute or two</p>
-            )}
-            {state.error && <p className="tv-modal-empty tv-error">{state.error}</p>}
-            {!state.loading && !state.error && state.view && !rows.length && <p className="tv-modal-empty">No results right now</p>}
-            {rows.map((r) => (
-              <div
-                key={r.symbol}
-                role="button"
-                tabIndex={-1}
-                className={`tv-watch-row tv-scan-row${r.symbol === symbol ? " active" : ""}`}
-                onClick={() => onPick(r.symbol)}
-              >
-                <b>{shownSymbol(r.symbol)}</b>
-                <span className={r.tone}>{r.badge}</span>
-                <span>{r.price != null ? Number(r.price).toFixed(precisionFor(r.symbol, r.price)) : "—"}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <aside className="tv-side">
+      <div className="tv-watch-head">
+        <span>Scanner</span>
+        <button type="button" className="tv-alert-create" onClick={() => scan(current)} disabled={state.scanning}>
+          {state.scanning ? "Scanning…" : "Scan"}
+        </button>
+      </div>
+      <div className="tv-sig-tabs tv-scan-tabs">
+        {SCANS.map((s) => (
+          <button key={s.id} type="button" className={`tv-btn${s.id === current.id ? " active" : ""}`} onClick={() => setScanId(s.id)}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      {state.view?.scannedAt && (
+        <p className="tv-scan-note">
+          Last scan {signalTime(state.view.scannedAt)} · {rows.length} symbols
+        </p>
       )}
-    </div>
+      <div className="tv-watch-rows">
+        {state.loading && <p className="tv-modal-empty">Loading…</p>}
+        {!state.loading && state.scanning && !state.view && (
+          <p className="tv-modal-empty">Scanning… the first scan can take a minute or two</p>
+        )}
+        {state.error && <p className="tv-modal-empty tv-error">{state.error}</p>}
+        {!state.loading && !state.error && state.view && !rows.length && <p className="tv-modal-empty">No results right now</p>}
+        {rows.map((r) => (
+          <div
+            key={r.symbol}
+            role="button"
+            tabIndex={-1}
+            className={`tv-watch-row tv-scan-row${r.symbol === symbol ? " active" : ""}`}
+            onClick={() => onPick(r.symbol)}
+          >
+            <b>{shownSymbol(r.symbol)}</b>
+            <span className={r.tone}>{r.badge}</span>
+            <span>{r.price != null ? Number(r.price).toFixed(precisionFor(r.symbol, r.price)) : "—"}</span>
+          </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
 // Price alerts (the user's ask, 13/11/26): a price for the symbol on the chart, and once it's
 // reached a notification goes to the phone (backend price_alerts.py), then it's gone from
-// here. Every alert still waiting is listed; a click on one opens its chart.
-function AlertsMenu({ symbol, lastPrice, digits, alerts, onCreate, onDelete, onPick }) {
-  const [open, setOpen, boxRef] = useMenuBox();
+// here. Every alert still waiting is listed; a click on one opens its chart. A new one shows
+// in the list under the form (the panel stays open, as TradingView's alerts panel does).
+function AlertsPanel({ open, symbol, lastPrice, digits, alerts, onCreate, onDelete, onPick }) {
   const [price, setPrice] = useState("");
   const [error, setError] = useState(null);
 
@@ -918,72 +1225,62 @@ function AlertsMenu({ symbol, lastPrice, digits, alerts, onCreate, onDelete, onP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, symbol]);
 
+  if (!open) return null;
+
   const create = () => {
     const value = Number(price);
     if (!(value > 0)) return setError("Enter a price");
     setError(null);
-    // Closed once it's set, as on TradingView, so it's clear it was (14/11/26).
-    onCreate(symbol, value).then(
-      () => setOpen(false),
-      (err) => setError(err instanceof TypeError ? "Server unavailable" : err.message)
-    );
+    onCreate(symbol, value).catch((err) => setError(err instanceof TypeError ? "Server unavailable" : err.message));
   };
 
   return (
-    <div className="tv-ind" ref={boxRef}>
-      <button type="button" className={`tv-btn${open ? " active" : ""}`} onClick={() => setOpen((o) => !o)} title="Price alerts">
-        {ICONS.alarm}
-        {alerts.length > 0 && <span className="tv-sig-count">{alerts.length}</span>}
-      </button>
-      {open && (
-        <div className="tv-watch">
-          <div className="tv-watch-head">
-            <span>Price alerts</span>
-          </div>
-          <form
-            className="tv-alert-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              create();
-            }}
+    <aside className="tv-side">
+      <div className="tv-watch-head">
+        <span>Price alerts</span>
+      </div>
+      <form
+        className="tv-alert-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          create();
+        }}
+      >
+        <b>{shownSymbol(symbol)}</b>
+        <input type="number" step="any" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <button type="submit" className="tv-alert-create">
+          Create
+        </button>
+      </form>
+      {error && <p className="tv-modal-empty tv-error">{error}</p>}
+      <div className="tv-watch-rows">
+        {!alerts.length && <p className="tv-modal-empty">No alerts — the phone gets one when the price gets there</p>}
+        {alerts.map((a) => (
+          <div
+            key={a.id}
+            role="button"
+            tabIndex={-1}
+            className={`tv-watch-row tv-alert-row${a.symbol === symbol ? " active" : ""}`}
+            onClick={() => onPick(a.symbol)}
           >
-            <b>{shownSymbol(symbol)}</b>
-            <input type="number" step="any" min="0" value={price} onChange={(e) => setPrice(e.target.value)} autoFocus />
-            <button type="submit" className="tv-alert-create">
-              Create
+            <b>{shownSymbol(a.symbol)}</b>
+            <span className={a.above ? "up" : "down"}>{a.above ? "▲" : "▼"}</span>
+            <span>{a.price}</span>
+            <button
+              type="button"
+              className="tv-watch-remove"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(a.id);
+              }}
+              title="Delete alert"
+            >
+              {ICONS.close}
             </button>
-          </form>
-          {error && <p className="tv-modal-empty tv-error">{error}</p>}
-          <div className="tv-watch-rows">
-            {!alerts.length && <p className="tv-modal-empty">No alerts — the phone gets one when the price gets there</p>}
-            {alerts.map((a) => (
-              <div
-                key={a.id}
-                role="button"
-                tabIndex={-1}
-                className={`tv-watch-row tv-alert-row${a.symbol === symbol ? " active" : ""}`}
-                onClick={() => onPick(a.symbol)}
-              >
-                <b>{shownSymbol(a.symbol)}</b>
-                <span className={a.above ? "up" : "down"}>{a.above ? "▲" : "▼"}</span>
-                <span>{a.price}</span>
-                <button
-                  type="button"
-                  className="tv-watch-remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(a.id);
-                  }}
-                  title="Delete alert"
-                >
-                  {ICONS.close}
-                </button>
-              </div>
-            ))}
           </div>
-        </div>
-      )}
-    </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -1041,6 +1338,17 @@ export default function TvApp() {
   const [showReturns, setShowReturns] = useState(prefs.showReturns !== false);
   const [candleEdge, setCandleEdge] = useState(() => clamp(Number(prefs.candleEdge) || CANDLE_EDGE.initial, CANDLE_EDGE.min, CANDLE_EDGE.max));
   const [candleBody, setCandleBody] = useState(() => clamp(Number(prefs.candleBody) || CANDLE_BODY.initial, CANDLE_BODY.min, CANDLE_BODY.max));
+  // The right side panel open (SIDE_PANELS key) or null; first time, the watchlist on a
+  // computer and nothing on a phone, where it would cover the chart.
+  const [side, setSide] = useState(() =>
+    prefs.side === null || SIDE_PANELS.some((p) => p.key === prefs.side)
+      ? prefs.side
+      : window.innerWidth > 700
+        ? "watchlist"
+        : null
+  );
+  // The signals page over the chart (not saved, so the panel always opens on the chart).
+  const [signalsPage, setSignalsPage] = useState(false);
   // Always the signals' light look since the moon button went (13/11/26), even for whoever
   // had dark saved.
   const theme = "light";
@@ -1053,6 +1361,7 @@ export default function TvApp() {
   const [priceAlerts, setPriceAlerts] = useState([]); // waiting, from the backend
   const [chartMenu, setChartMenu] = useState(null); // the right-click menu: { x, y, width, height, price }
   const [trade, setTrade] = useState(null); // the user's trade on the chart (the Trades box)
+  const [live, setLive] = useState(null); // the latest price, every few seconds: { symbol, price }
 
   const containerRef = useRef(null);
   const chartRef = useRef(null);
@@ -1063,18 +1372,19 @@ export default function TvApp() {
   const returnsRef = useRef(null);
   const alertLinesRef = useRef(null);
   const tradeZoneRef = useRef(null);
+  const livePriceRef = useRef(null);
   const framedRef = useRef(null);
 
   useEffect(() => {
     try {
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ symbol, timeframe, showZones, showBreaks, showEma, showReturns, candleEdge, candleBody, watchlist })
+        JSON.stringify({ symbol, timeframe, showZones, showBreaks, showEma, showReturns, candleEdge, candleBody, watchlist, side })
       );
     } catch {
       /* private mode etc. — prefs just don't stick */
     }
-  }, [symbol, timeframe, showZones, showBreaks, showEma, showReturns, candleEdge, candleBody, watchlist]);
+  }, [symbol, timeframe, showZones, showBreaks, showEma, showReturns, candleEdge, candleBody, watchlist, side]);
 
   // Before paint, so the page's colors switch together with the chart's.
   useLayoutEffect(() => {
@@ -1088,9 +1398,17 @@ export default function TvApp() {
       crosshair: { mode: 0 },
       timeScale: { rightOffset: RIGHT_OFFSET, tickMarkFormatter },
       localization: { locale: LOCALE },
+      // A flick keeps the chart gliding a little, as on TradingView (23/11/26).
+      kineticScroll: { mouse: true, touch: true },
     });
     // Thick candle outlines and wicks (the built-in candles' are 1px); colored by the theme, below.
-    const series = chart.addCustomSeries(new ThickCandlestickSeries(), { borderWidth: 3, wickWidth: 3 });
+    // The library's own last-price line is off: LivePriceLine draws it, with the price beside it.
+    const series = chart.addCustomSeries(new ThickCandlestickSeries(), {
+      borderWidth: 3,
+      wickWidth: 3,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
     // First, so it's under the zones.
     const paneFill = new PaneFill();
     series.attachPrimitive(paneFill);
@@ -1107,6 +1425,8 @@ export default function TvApp() {
     series.attachPrimitive(returns);
     const alertLines = new AlertLines();
     series.attachPrimitive(alertLines);
+    const livePrice = new LivePriceLine();
+    series.attachPrimitive(livePrice);
     // Colored by the theme, below.
     const ema = chart.addSeries(LineSeries, {
       lineWidth: 2,
@@ -1124,6 +1444,7 @@ export default function TvApp() {
     returnsRef.current = returns;
     alertLinesRef.current = alertLines;
     tradeZoneRef.current = tradeZone;
+    livePriceRef.current = livePrice;
     return () => {
       chartRef.current = null;
       seriesRef.current = null;
@@ -1133,7 +1454,53 @@ export default function TvApp() {
       returnsRef.current = null;
       alertLinesRef.current = null;
       tradeZoneRef.current = null;
+      livePriceRef.current = null;
       chart.remove();
+    };
+  }, []);
+
+  // TradingView's free drag (23/11/26): dragging the chart up or down moves the prices too,
+  // not only the time, and the price stops fitting the candles by itself; a double click
+  // brings that back (TradingView's "auto"), as does a new symbol or timeframe. The library
+  // moves the prices itself once auto is off, so this only does the drag that turns it off.
+  // Mouse only: on a phone two fingers zoom, and one of them would also move the prices.
+  useEffect(() => {
+    const el = containerRef.current;
+    let drag = null;
+    const onDown = (e) => {
+      const chart = chartRef.current;
+      if (e.button !== 0 || e.pointerType === "touch" || !chart) return;
+      if (!chart.priceScale("right").options().autoScale) return;
+      const paneHeight = chart.paneSize().height;
+      const range = chart.priceScale("right").getVisibleRange();
+      // Not on the time scale under the candles, which squeezes and stretches the time.
+      if (!range || e.clientY - el.getBoundingClientRect().top > paneHeight) return;
+      drag = { y: e.clientY, range, paneHeight, moved: false };
+    };
+    const onMove = (e) => {
+      const chart = chartRef.current;
+      if (!drag || !chart) return;
+      const dy = e.clientY - drag.y;
+      if (!drag.moved && Math.abs(dy) < 4) return;
+      drag.moved = true;
+      const shift = (dy / drag.paneHeight) * (drag.range.to - drag.range.from);
+      const scale = chart.priceScale("right");
+      scale.setAutoScale(false);
+      scale.setVisibleRange({ from: drag.range.from + shift, to: drag.range.to + shift });
+    };
+    const onUp = () => {
+      drag = null;
+    };
+    const onDoubleClick = () => chartRef.current?.priceScale("right").setAutoScale(true);
+    el.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    el.addEventListener("dblclick", onDoubleClick);
+    return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      el.removeEventListener("dblclick", onDoubleClick);
     };
   }, []);
 
@@ -1191,6 +1558,40 @@ export default function TvApp() {
     };
   }, [symbol, timeframe]);
 
+  // The live price of the symbol on screen, every LIVE_EVERY_MS while the page is in view;
+  // only the newest answer counts.
+  useEffect(() => {
+    if (!symbol) return;
+    let stale = false;
+    let sent = 0;
+    let shown = 0;
+    const load = () => {
+      if (document.visibilityState !== "visible") return;
+      const n = ++sent;
+      getLivePrice(symbol)
+        .then(({ price }) => {
+          if (stale || n < shown || !(price > 0)) return;
+          shown = n;
+          setLive((prev) => (prev?.symbol === symbol && prev.price === price ? prev : { symbol, price }));
+          // Its watchlist row moves with it, today's change kept from the same last close.
+          setQuotes((all) => {
+            const q = all[symbol];
+            if (q?.price == null || q.price === price) return all;
+            const prevClose = q.change_percent != null ? q.price / (1 + q.change_percent / 100) : null;
+            const change_percent = prevClose ? ((price - prevClose) / prevClose) * 100 : q.change_percent;
+            return { ...all, [symbol]: { ...q, price, change_percent } };
+          });
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, LIVE_EVERY_MS);
+    return () => {
+      stale = true;
+      clearInterval(id);
+    };
+  }, [symbol]);
+
   // The watchlist's prices, refreshed every minute; plus the name of a symbol on the chart
   // that isn't in it, for the legend.
   useEffect(() => {
@@ -1244,6 +1645,35 @@ export default function TvApp() {
     emaRef.current?.applyOptions({ visible: showEma });
     emaRef.current?.setData(showEma ? emaLine : []);
   }, [emaLine, showEma]);
+
+  // The live price moves the last candle (and EMA 50's last point) between the minute loads,
+  // and the price line with it; after a load it goes back on the new last candle.
+  useEffect(() => {
+    const series = seriesRef.current;
+    const line = livePriceRef.current;
+    if (!series || !line) return;
+    const list = candles?.list;
+    if (!list?.length) {
+      line.set(null);
+      return;
+    }
+    const c = CHART_THEMES[theme];
+    let bar = list[list.length - 1];
+    const price = live?.symbol === candles.symbol ? live.price : null;
+    if (price != null) {
+      bar = { ...bar, close: price, high: Math.max(bar.high, price), low: Math.min(bar.low, price) };
+      series.update({ ...bar, color: bar.close >= bar.open ? c.up : c.down });
+      if (showEma && emaLine.length > 1) {
+        const alpha = 2 / (EMA_PERIOD + 1);
+        emaRef.current?.update({ time: bar.time, value: price * alpha + emaLine[emaLine.length - 2].value * (1 - alpha) });
+      }
+    }
+    line.set({
+      price: bar.close,
+      color: bar.close >= bar.open ? c.up : c.down,
+      precision: precisionFor(candles.symbol, list[list.length - 1].close),
+    });
+  }, [candles, live, theme, emaLine, showEma]);
 
   // The trade picked in the Trades box, while its symbol is the one loaded.
   const shownTrade = trade && candles?.symbol === trade.symbol ? trade : null;
@@ -1416,7 +1846,7 @@ export default function TvApp() {
   // ↑/↓ go through the watchlist.
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (search || e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.("input, textarea")) return;
+      if (search || signalsPage || e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.("input, textarea")) return;
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         if (!watchlist.length) return;
         e.preventDefault();
@@ -1430,10 +1860,15 @@ export default function TvApp() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [search, watchlist, symbol]);
+  }, [search, signalsPage, watchlist, symbol]);
 
   const hasCandles = !!candles?.list.length;
-  const lastPrice = candles?.symbol === symbol && hasCandles ? candles.list[candles.list.length - 1].close : quotes[symbol]?.price;
+  const lastPrice =
+    live?.symbol === symbol
+      ? live.price
+      : candles?.symbol === symbol && hasCandles
+        ? candles.list[candles.list.length - 1].close
+        : quotes[symbol]?.price;
   const priceDigits = lastPrice != null ? precisionFor(symbol, lastPrice) : 2;
 
   const openChartMenu = (e) => {
@@ -1448,9 +1883,10 @@ export default function TvApp() {
   };
 
   const closeChartMenu = useCallback(() => setChartMenu(null), []);
+  const closeSignalsPage = useCallback(() => setSignalsPage(false), []);
 
   return (
-    <div className="tv">
+    <div className={`tv${side ? " tv-side-open" : ""}`}>
       <header className="tv-top">
         <button type="button" className="tv-btn tv-symbol" onClick={() => setSearch({ mode: "open", text: "" })} title="Symbol search">
           <b>{shownSymbol(symbol)}</b>
@@ -1505,32 +1941,17 @@ export default function TvApp() {
           ]}
         />
         <CandleMenu edge={candleEdge} body={candleBody} onEdge={setCandleEdge} onBody={setCandleBody} />
-        <WatchlistMenu
-          watchlist={watchlist}
-          quotes={quotes}
-          symbol={symbol}
-          onPick={setSymbol}
-          onAdd={() => setSearch({ mode: "add", text: "" })}
-          onRemove={removeFromWatchlist}
-        />
-        <ScannerMenu symbol={symbol} onPick={setSymbol} />
-        <SignalsMenu symbol={symbol} onPick={setSymbol} />
-        <TradesMenu
-          tradeId={trade?.id}
-          onPick={(t) => {
-            setSymbol(t.symbol);
-            setTrade(t);
-          }}
-        />
-        <AlertsMenu
-          symbol={symbol}
-          lastPrice={lastPrice}
-          digits={priceDigits}
-          alerts={priceAlerts}
-          onCreate={addPriceAlert}
-          onDelete={removePriceAlert}
-          onPick={setSymbol}
-        />
+        <span className="tv-sep" />
+        {/* TradingView's Alert button: opens the alerts panel on the right. */}
+        <button
+          type="button"
+          className={`tv-btn tv-btn-text${side === "alerts" ? " active" : ""}`}
+          onClick={() => setSide((s) => (s === "alerts" ? null : "alerts"))}
+          title="Price alerts"
+        >
+          {ICONS.alarm}
+          Alert
+        </button>
       </header>
 
       <main className="tv-chart-area">
@@ -1552,6 +1973,46 @@ export default function TvApp() {
           </div>
         )}
       </main>
+
+      {/* Mounted even while closed, so a scan in progress keeps its result. */}
+      <WatchlistPanel
+        open={side === "watchlist"}
+        watchlist={watchlist}
+        quotes={quotes}
+        symbol={symbol}
+        onPick={setSymbol}
+        onAdd={() => setSearch({ mode: "add", text: "" })}
+        onRemove={removeFromWatchlist}
+      />
+      <ScannerPanel open={side === "scanner"} symbol={symbol} onPick={setSymbol} />
+      <SignalsPanel open={side === "signals"} symbol={symbol} onPick={setSymbol} />
+      <TradesPanel
+        open={side === "trades"}
+        tradeId={trade?.id}
+        onPick={(t) => {
+          setSymbol(t.symbol);
+          setTrade(t);
+        }}
+      />
+      <AlertsPanel
+        open={side === "alerts"}
+        symbol={symbol}
+        lastPrice={lastPrice}
+        digits={priceDigits}
+        alerts={priceAlerts}
+        onCreate={addPriceAlert}
+        onDelete={removePriceAlert}
+        onPick={setSymbol}
+      />
+      <SignalsPage
+        open={signalsPage}
+        onPick={(s) => {
+          setSymbol(s);
+          setSignalsPage(false);
+        }}
+        onClose={closeSignalsPage}
+      />
+      <SideRail side={side} onSide={setSide} alertCount={priceAlerts.length} page={signalsPage} onPage={setSignalsPage} />
 
       {search && (
         <SymbolSearch

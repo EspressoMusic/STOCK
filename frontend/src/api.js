@@ -269,6 +269,11 @@ export function getQuote(symbol) {
   return request(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
 }
 
+// Just the latest price, for the chart panel's live candle (asked every few seconds).
+export function getLivePrice(symbol) {
+  return request(`/api/price?symbol=${encodeURIComponent(symbol)}`);
+}
+
 export function getStockProfile(symbol) {
   return request(`/api/stock-profile?symbol=${encodeURIComponent(symbol)}`);
 }

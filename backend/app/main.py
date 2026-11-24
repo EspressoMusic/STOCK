@@ -23,7 +23,7 @@ from .schemas import (
     ScanOut, ScanSummaryOut, RunScanRequest, TechnicalScanOut, CandlesOut,
     EmaBreakoutScanOut, EmaTouch4hScanOut, EmaDoubleTouchForexScanOut, PatternScanOut, TripleTouchScanOut,
     StochExtremeScanOut,
-    QuoteOut, StockProfileOut, MarketCandidateOut, CryptoScanOut, CapScanOut, ChartAnalysisOut,
+    QuoteOut, LivePriceOut, StockProfileOut, MarketCandidateOut, CryptoScanOut, CapScanOut, ChartAnalysisOut,
     ChatReplyOut, NewsDigestIn, NewsDigestOut, NewsItemOut, WorldNewsOut,
     SymbolSearchOut, SymbolMatchOut, BillingStatusOut,
     DailyDigestIn, DailyDigestOut,
@@ -40,7 +40,7 @@ from .technical_scan import (
     scan_ema50_double_touch_forex_1h, scan_pattern_strategy, scan_triple_touch_4h, scan_stoch_extreme_daily_4h,
 )
 from .candles import get_candles, DEFAULT_CANDLE_TIMEFRAME
-from .quote import get_quote, search_symbols
+from .quote import get_live_price, get_quote, search_symbols
 from .chart_analysis import analyze_chart_image
 from .chat import generate_chat_reply
 from .ai_summary import (
@@ -643,6 +643,15 @@ def quote(symbol: str = Query(..., min_length=1)):
         symbol=result.symbol, name=result.name, price=result.price,
         change_percent=result.change_percent, market_cap=result.market_cap,
     )
+
+
+# The chart panel's live candle and price line (tv.html), every few seconds.
+@app.get("/api/price", response_model=LivePriceOut)
+def live_price(symbol: str = Query(..., min_length=1)):
+    price = get_live_price(symbol.upper())
+    if price is None:
+        raise HTTPException(status_code=404, detail="No price for this symbol.")
+    return LivePriceOut(symbol=symbol.upper(), price=price)
 
 
 @app.get("/api/crypto-scan", response_model=CryptoScanOut)

@@ -1,23 +1,26 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
 
 /* The TradingView-style chart panel (tv.html). Its own styles only — it doesn't load the
-   app's index.css. Light is the user's own TradingView gray (TvApp's CHART_THEMES), dark is
-   TradingView's. */
+   app's index.css. The chart itself is the user's own TradingView gray (TvApp's
+   CHART_THEMES); since 23/11/26 everything around it (top bar, side panels, menus) is
+   TradingView's dark frame, as in the user's screenshot, with 4px black gaps between them. */
 
 :root {
   --tv-accent: #2962ff;
   --tv-up: #089981;
   --tv-down: #f23645;
-  --tv-bg: #787b86;
-  --tv-top-bg: #63666f;
-  --tv-border: #5f626c;
-  --tv-text: #16181e;
-  --tv-muted: #2f323b;
-  --tv-hover: #6b6e78;
-  --tv-row-active: rgba(41, 98, 255, 0.12);
-  --tv-shade: rgba(19, 23, 34, 0.4);
-  --tv-shadow: 0 2px 14px rgba(0, 0, 0, 0.15);
-  color-scheme: light;
+  --tv-frame: #000;
+  --tv-bg: #0f0f0f;
+  --tv-top-bg: #0f0f0f;
+  --tv-border: #2e2e2e;
+  --tv-row-line: #1f1f1f;
+  --tv-text: #dbdbdb;
+  --tv-muted: #8c8c8c;
+  --tv-hover: #2e2e2e;
+  --tv-row-active: rgba(41, 98, 255, 0.22);
+  --tv-shade: rgba(0, 0, 0, 0.55);
+  --tv-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
 }
 
 :root[data-theme="dark"] {
@@ -45,7 +48,7 @@ body,
 }
 
 body {
-  background: var(--tv-bg);
+  background: var(--tv-frame);
   color: var(--tv-text);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
@@ -63,13 +66,16 @@ button {
   cursor: pointer;
 }
 
-/* Top toolbar and chart; the watchlist opens from the top bar. */
+/* TradingView's layout: the top bar, then the chart, the docked side panel (when one is
+   open) and the icon rail on the right edge. */
 .tv {
   display: grid;
   height: 100vh;
   height: 100dvh; /* a phone's browser bars don't cover the time scale */
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: 40px minmax(0, 1fr);
+  row-gap: 4px;
+  background: var(--tv-frame);
 }
 
 .tv-btn {
@@ -89,6 +95,16 @@ button {
 
 .tv-btn.active {
   color: var(--tv-accent);
+}
+
+/* A button with a word next to its icon (Indicators, Alert), as on TradingView */
+.tv-btn-text {
+  padding: 0 10px 0 6px;
+}
+
+.tv-btn-text.active {
+  color: #fff;
+  background: var(--tv-hover);
 }
 
 .tv-icon-btn {
@@ -114,7 +130,14 @@ button {
   gap: 2px;
   padding: 0 6px;
   background: var(--tv-top-bg);
-  border-bottom: 1px solid var(--tv-border);
+}
+
+/* The symbol in a rounded box, TradingView's symbol search button */
+.tv-symbol {
+  margin-right: 2px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: #1f1f1f;
 }
 
 .tv-symbol b {
@@ -126,6 +149,12 @@ button {
 .tv-interval {
   padding: 0 7px;
   font-weight: 700;
+}
+
+/* The timeframe on screen: a lit box, not blue text, as on TradingView */
+.tv-interval.active {
+  color: #fff;
+  background: var(--tv-hover);
 }
 
 /* The Indicators button and its box */
@@ -239,7 +268,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--tv-muted);
+  color: #16181e; /* on the gray chart, not the dark frame */
   font-size: 15px;
   pointer-events: none;
 }
@@ -248,29 +277,81 @@ button {
   color: var(--tv-down);
 }
 
-/* Watchlist box under its top bar button */
-.tv-watch {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 40;
+/* The side panel docked between the chart and the rail; the chart narrows beside it */
+.tv-side {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   flex-direction: column;
-  width: 320px;
-  max-width: calc(100vw - 16px);
-  max-height: min(560px, calc(100vh - 60px));
+  width: 340px;
+  min-height: 0;
+  margin-left: 4px;
   overflow: hidden;
-  border-radius: 6px;
   background: var(--tv-bg);
-  box-shadow: var(--tv-shadow);
+}
+
+/* The icon rail on the right edge: a click opens its panel, another closes it */
+.tv-rail {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 46px;
+  margin-left: 4px;
+  padding-top: 6px;
+  background: var(--tv-top-bg);
+}
+
+.tv-rail-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+}
+
+.tv-rail-btn:hover {
+  background: var(--tv-hover);
+}
+
+.tv-rail-btn.active {
+  color: #fff;
+  background: var(--tv-hover);
+}
+
+/* The number of alerts waiting, TradingView's red dot with a count */
+.tv-rail-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--tv-down);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
 }
 
 .tv-watch-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: flex-end;
-  height: 32px;
-  padding: 0 6px;
+  gap: 6px;
+  height: 44px;
+  padding: 0 6px 0 12px;
+  font-size: 14px;
+}
+
+.tv-watch-head > span {
+  margin-right: auto;
 }
 
 .tv-watch-row {
@@ -293,6 +374,7 @@ button {
 .tv-watch-row {
   position: relative;
   height: 32px;
+  border-bottom: 1px solid var(--tv-row-line);
   cursor: pointer;
 }
 
@@ -345,6 +427,7 @@ button {
 /* Signals box: the watchlist's box, a tab per strategy */
 .tv-sig-tabs {
   display: flex;
+  flex: none;
   gap: 2px;
   padding: 0 6px 6px;
   border-bottom: 1px solid var(--tv-border);
@@ -359,19 +442,12 @@ button {
   grid-template-columns: minmax(0, 1fr) 72px 112px;
 }
 
-/* My trades box: name, zone, when the zone began */
-.tv-watch.tv-trades {
-  width: 400px;
-}
-
+/* My trades panel: name, zone, when the zone began */
 .tv-watch-row.tv-trade-row {
-  grid-template-columns: minmax(0, 1fr) 176px 104px;
+  grid-template-columns: minmax(0, 1fr) 140px 96px;
 }
 
-/* Scanner box: the signals' box with a tab per scan and a Scan button */
-.tv-watch.tv-scan {
-  width: 360px;
-}
+/* Scanner panel: the signals' panel with a tab per scan and a Scan button */
 
 .tv-sig-tabs.tv-scan-tabs {
   flex-wrap: wrap;
@@ -397,6 +473,7 @@ button {
 /* Price alerts box: the symbol and a price to set one, then the alerts waiting */
 .tv-alert-form {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
   padding: 0 12px 10px;
@@ -435,6 +512,185 @@ button {
 
 .tv-watch-row.tv-alert-row {
   grid-template-columns: minmax(0, 1fr) 30px 110px;
+}
+
+/* The signals page button, set apart under the panels' icons */
+.tv-rail-sep {
+  width: 26px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--tv-border);
+}
+
+/* The signals page (23/11/26): over the chart and the side panel, cards with the pictures */
+.tv-page {
+  grid-column: 1 / 3;
+  grid-row: 2;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--tv-bg);
+}
+
+.tv-page-head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 8px 8px 8px 20px;
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-page-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.tv-page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.tv-page-close {
+  margin-left: auto;
+}
+
+.tv-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 20px 24px;
+}
+
+.tv-page-section {
+  margin: 18px 0 4px;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.tv-page-day h3 {
+  margin: 14px 0 8px;
+  color: var(--tv-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tv-page-day h3 span {
+  font-weight: 600;
+}
+
+.tv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  gap: 12px;
+}
+
+.tv-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--tv-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #161616;
+}
+
+.tv-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.tv-card-symbol {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.tv-card-symbol:hover {
+  color: var(--tv-accent);
+}
+
+.tv-card-dir {
+  font-size: 12px;
+}
+
+.tv-card-dir.up {
+  color: var(--tv-up);
+}
+
+.tv-card-dir.down {
+  color: var(--tv-down);
+}
+
+.tv-card-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tv-hover);
+  color: var(--tv-muted);
+  font-size: 11px;
+}
+
+.tv-card-time {
+  margin-left: auto;
+  color: var(--tv-muted);
+  font-size: 12px;
+}
+
+.tv-card-pic {
+  display: block;
+  cursor: zoom-in;
+}
+
+.tv-card-pic img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.tv-card-none,
+.tv-card-details {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--tv-muted);
+  font-size: 12px;
+  white-space: pre-line;
+}
+
+.tv-page-week {
+  border-bottom: 1px solid var(--tv-row-line);
+}
+
+.tv-page-week-head {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 4px;
+  text-align: left;
+}
+
+.tv-page-week-head:hover,
+.tv-page-week-head.open {
+  color: #fff;
+}
+
+/* A picture full size: a click anywhere closes it */
+.tv-modal-shade.tv-picture {
+  align-items: center;
+  padding: 16px;
+  cursor: zoom-out;
+}
+
+.tv-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  box-shadow: var(--tv-shadow);
 }
 
 /* Symbol search dialog */
@@ -534,7 +790,8 @@ button {
 }
 
 /* On a phone (the live site, 19/11/26) the top bar wraps onto a second row and every box
-   opens across the screen under it. Last in the file, so it wins over the boxes' own widths. */
+   opens across the screen under it; a side panel covers the chart instead of narrowing it.
+   Last in the file, so it wins over the boxes' own widths. */
 @media (max-width: 700px) {
   .tv {
     grid-template-rows: auto minmax(0, 1fr);
@@ -545,7 +802,6 @@ button {
     padding: 2px 4px;
   }
 
-  .tv-watch,
   .tv-ind-menu {
     position: fixed;
     top: 76px;
@@ -556,8 +812,31 @@ button {
     max-height: calc(100dvh - 90px);
   }
 
-  .tv-watch.tv-trades,
-  .tv-watch.tv-scan {
+  .tv-side {
+    grid-column: 1;
+    z-index: 30;
     width: auto;
+    margin-left: 0;
+  }
+
+  .tv-rail {
+    width: 40px;
+  }
+
+  /* The signals page: the tabs on their own row under the title and the close button */
+  .tv-page-tabs {
+    order: 1;
+    width: 100%;
+  }
+
+  .tv-page-head,
+  .tv-page-body {
+    padding-left: 12px;
+    padding-right: 8px;
+  }
+
+  .tv-rail-btn {
+    width: 34px;
+    height: 34px;
   }
 }

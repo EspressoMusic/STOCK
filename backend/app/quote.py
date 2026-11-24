@@ -54,6 +54,22 @@ def search_symbols(query: str, limit: int = 8) -> list[SymbolMatch]:
     return matches[:limit]
 
 
+def get_live_price(symbol: str) -> Optional[float]:
+    """The chart panel's live price, polled every few seconds: Yahoo's own last price
+    from one quick 1-minute request (fast_info is slower). Not the last 1-minute bar's
+    close: with the market shut that differs from the day's official close."""
+    try:
+        ticker = yf.Ticker(symbol)
+        bars = ticker.history(period="1d", interval="1m")
+        price = (ticker.history_metadata or {}).get("regularMarketPrice")
+        if price is None and not bars.empty:
+            price = bars["Close"].iloc[-1]
+        return round(float(price), 6) if price is not None else None
+    except Exception:
+        logger.warning("Live price fetch failed for %s", symbol, exc_info=True)
+        return None
+
+
 def get_quote(symbol: str) -> Optional[Quote]:
     try:
         ticker = yf.Ticker(symbol)
